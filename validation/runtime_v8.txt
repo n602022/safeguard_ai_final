@@ -1,0 +1,6 @@
+Python compile: PASS
+Rule tests, SQLite triage, pending-to-confirmed upgrade, UTC+7: PASS
+Streamlit AppTest: five pages rendered without Python exceptions.
+No browser visual regression test in this turn.
+Sequence test: real model outputs; event-reference acknowledgement simulated.
+Persistence verified separately using temporary SQLite in test_event_upgrade.py.

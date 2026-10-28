@@ -5,9 +5,9 @@ import sys
 sys.path.insert(0,str(__import__('pathlib').Path(__file__).resolve().parents[1]))
 from app_clock import app_now
 
-s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate','refine_distant_detections'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
+s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate','refine_distant_detections','refine_weak_ppe_detections'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
 ns={'math':math,'cv2':cv2,'np':np};exec(compile(s,'core','exec'),ns)
-labels=['Person','NO-Hardhat','Hardhat','NO-Safety Vest','Safety Vest']
+labels=['Person','NO-Hardhat','Hardhat','NO-Safety Vest','Safety Vest','NO-Mask','Mask']
 def set_dets(ds):
  boxes=[SimpleNamespace(cls=np.array(labels.index(l)),conf=np.array(c),xyxy=np.array([b])) for l,c,b in ds]
  ns['_model']=SimpleNamespace(predict=lambda **kw:[SimpleNamespace(boxes=boxes,names=labels)])
@@ -15,7 +15,7 @@ f=np.random.default_rng(42).integers(65,225,(300,300,3),dtype=np.uint8)
 p=('Person',.9,[80,25,200,280]);v=('NO-Hardhat',.9,[115,30,150,65])
 def run(tracker=None,idx=1,single=True):return ns['smart_detect_and_annotate'](f,tracker=tracker,frame_idx=idx,single_frame_mode=single)[1]
 set_dets([v]);assert not run(),'orphan'
-set_dets([p,v,('Hardhat',.3,[110,27,155,65])]);assert not run(),'low confidence PPE must veto'
+set_dets([p,v,('Hardhat',.3,[110,27,155,65])]);assert run(),'weak positive must not erase strong negative'
 set_dets([p,v]);assert len(run())==1,'positive image control'
 t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in range(0,35,5): assert not run(t,i,False)
@@ -40,7 +40,7 @@ assert not run(t,35,False)[0]['temporal_quality_pass'],'blur/low light fails tem
 f=original_frame
 set_dets([p,v]);t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in [0,5,10]:assert not run(t,i,False)
-set_dets([p,v,('Hardhat',.4,[110,27,155,65])]);assert not run(t,15,False)
+set_dets([p,v,('Hardhat',.95,[110,27,155,65])]);assert not run(t,15,False)
 set_dets([p,v])
 for i in [20,25,30,35,40,45,50]:assert not run(t,i,False)
 assert run(t,55,False)[0]['temporal_quality_pass']
@@ -71,3 +71,11 @@ assert saved[-1]['status']=='confirmed'
 ns['save_new_violations_to_db'](vs,f,auto_confirm_threshold=.95)
 assert saved[-1]['status']=='pending'
 print('PASS: PPE veto, orphan rejection, positive image, temporal quality diagnostics, threshold policy persistence, missing support reset, duplicate suppression, database status threshold')
+
+# Below-auto-threshold predictions must reach review for all PPE classes.
+for label, box in [('NO-Hardhat',[115,30,150,65]), ('NO-Safety Vest',[95,80,185,210]), ('NO-Mask',[115,50,150,80])]:
+    set_dets([p,(label,.69,box)])
+    result=ns['smart_detect_and_annotate'](f,active_violation_types=('NO-Hardhat','NO-Safety Vest','NO-Mask'),single_frame_mode=True)[1]
+    assert result, label+' was dropped before triage'
+    assert ns['classify_event_status'](result[0]['confidence'],.75)=='pending'
+print('PASS: all three PPE violations at 69% reach pending; weak positive cannot veto stronger negative')

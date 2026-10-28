@@ -1,0 +1,1 @@
+PASS frame425: false helmet label removed; uncertain helmet shown; no invented no-helmet event ['Cong nhan #01 (79%)', 'AI: Ao phan quang (49%)', 'MU: CAN KIEM TRA']

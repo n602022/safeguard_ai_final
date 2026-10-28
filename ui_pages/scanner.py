@@ -532,6 +532,7 @@ def render_scanner_page(raw_events: list):
                         tracker=tracker,
                         frame_idx=frame_idx,
                         analysis_fps=fps_val,
+                        auto_confirm_threshold=effective_auto_confirm,
                     )
                     st.session_state.last_scan_telemetry = {
                         "worker_cnt": worker_cnt,
@@ -549,7 +550,7 @@ def render_scanner_page(raw_events: list):
                             fps=fps_val,
                         )
                         auto_cnt += len(auto_list)
-                        human_cnt += len(human_list)
+                        human_cnt += len(human_list) - sum(bool(e.get("upgraded_from_pending")) for e in auto_list)
                         if enable_audio:
                             play_alert_beep()
 
@@ -651,6 +652,7 @@ def render_scanner_page(raw_events: list):
                             tracker=img_tracker,
                             frame_idx=1,
                             single_frame_mode=True,
+                            auto_confirm_threshold=effective_auto_confirm,
                         )
                         ok_enc, jpg_buf = cv2.imencode(".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
                         img_uri = (

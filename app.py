@@ -48,6 +48,7 @@ from ui_pages.documents import render_documents_page
 from ui_pages.review import render_review_page
 from ui_pages.scanner import render_scanner_page
 from ui_theme import apply_ui_theme
+from ui_transition import install_transition_guard
 
 
 @st.cache_resource(show_spinner=False)
@@ -96,6 +97,7 @@ def main():
 
     # 2. Áp dụng Design System & Theme từ bộ nhớ đệm pre-compiled (< 0.01ms, 0 đọc đĩa)
     apply_ui_theme()
+    install_transition_guard()
 
     # 3. Lấy dữ liệu sự kiện từ bộ nhớ đệm RAM (chỉ đọc lại SQLite khi file safeguard.db thay đổi)
     raw_events, enriched_events, db_connected = get_cached_events_bundle()
@@ -118,18 +120,19 @@ def main():
 
     # 6. Điều phối hiển thị trang chức năng đang chọn
     _t2 = time.perf_counter()
-    if active_page == "dashboard":
-        render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
-    elif active_page == "scan":
-        render_scanner_page(raw_events=raw_events)
-    elif active_page == "review":
-        render_review_page(raw_events=raw_events, enriched_events=enriched_events)
-    elif active_page == "chat":
-        render_assistant_page(raw_events=raw_events, enriched_events=enriched_events)
-    elif active_page == "docs":
-        render_documents_page()
-    else:
-        render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
+    with st.container(key=f"page_content_{active_page}"):
+        if active_page == "dashboard":
+            render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
+        elif active_page == "scan":
+            render_scanner_page(raw_events=raw_events)
+        elif active_page == "review":
+            render_review_page(raw_events=raw_events, enriched_events=enriched_events)
+        elif active_page == "chat":
+            render_assistant_page(raw_events=raw_events, enriched_events=enriched_events)
+        elif active_page == "docs":
+            render_documents_page()
+        else:
+            render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
 
     if perf_on:
         # Chế độ đo hiệu năng: mở trang với ?perf=1 để biết phần nào chậm

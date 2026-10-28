@@ -727,6 +727,37 @@ def refine_distant_detections(frame, detections, tracker, frame_idx):
     return detections+additions
 
 
+def refine_weak_ppe_detections(frame, detections, threshold):
+    """Revisit weak explicit PPE predictions at higher resolution.
+
+    A missing detection is never converted into a violation. Only an actual
+    model prediction can be recovered, with its original model score.
+    """
+    if not any(d["label"].startswith("NO-") and 0.25 <= d["confidence"] < threshold for d in detections):
+        return detections
+    refined = []
+    for result in _model.predict(source=frame, conf=0.25, imgsz=960, verbose=False):
+        if result.boxes is None:
+            continue
+        for box in result.boxes:
+            label = result.names[int(box.cls.item())]
+            if label not in {"Hardhat", "Safety Vest", "Mask", "NO-Hardhat", "NO-Safety Vest", "NO-Mask"}:
+                continue
+            refined.append({"label": label, "confidence": float(box.conf.item()),
+                            "bbox": [int(round(v)) for v in box.xyxy[0].tolist()]})
+    output = []
+    for detection in detections:
+        # Preserve high-confidence detections and person tracking. Replace a
+        # weak detection only when the second pass localizes the same object.
+        matches = [d for d in refined if d["label"] == detection["label"]
+                   and iou_score(d["bbox"], detection["bbox"]) >= 0.3]
+        if detection["confidence"] < 0.75 and matches:
+            detection = dict(max(matches, key=lambda d:d["confidence"]))
+            detection["inference_scale"] = 960
+        output.append(detection)
+    return output
+
+
 def smart_detect_and_annotate(
     frame_bgr,
     conf_threshold=0.50,
@@ -735,6 +766,7 @@ def smart_detect_and_annotate(
     frame_idx: int = 0,
     single_frame_mode: bool = False,
     analysis_fps: float = 30.0,
+    auto_confirm_threshold: float = 0.75,
 ):
     """Nhận diện đa đối tượng thông minh trong khung hình + Tự động chống lóa/mờ + Chống báo lặp."""
     results = _model.predict(source=frame_bgr, conf=min(conf_threshold, 0.25), verbose=False)
@@ -752,19 +784,48 @@ def smart_detect_and_annotate(
                 "bbox": coords,
             })
 
+    raw_detections = refine_weak_ppe_detections(frame_bgr, raw_detections, conf_threshold)
     h, w = frame_bgr.shape[:2]
     gray_frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     frame_env = evaluate_lighting_and_glare(frame_bgr, precomputed_gray=gray_frame)
     global_stats = frame_env.get("_global_stats")
 
-    # Recheck a claimed vest at person scale. Disagreement is evidence for
-    # human review, never grounds for automatic confirmation.
+    # Recheck a claimed vest at person scale. An explicit NO-* prediction
+    # follows the same configured confidence triage as other detections.
     if tracker is None:
         tracker = MultiPersonTrackerAndDeduplicator()
     if not hasattr(tracker, "_vest_crop_cache"):
         tracker._vest_crop_cache = []
     raw_detections = refine_distant_detections(frame_bgr, raw_detections, tracker, frame_idx)
     persons_for_crop = [d for d in raw_detections if d["label"] == "Person" and d["confidence"] >= 0.5]
+    # Oversized helmet boxes can cover arms/shoulders in low-angle views.
+    # Require crop-scale agreement before presenting those as a detected helmet.
+    uncertain_hats = []
+    checked_hats = []
+    for hat in [d for d in raw_detections if d["label"] == "Hardhat"]:
+        owners = [p for p in persons_for_crop if box_inclusion_ratio(hat["bbox"],p["bbox"]) >= .6]
+        if not owners: continue
+        owner = min(owners, key=lambda p:(p["bbox"][2]-p["bbox"][0])*(p["bbox"][3]-p["bbox"][1]))
+        pb=owner["bbox"];hb=hat["bbox"];pw=pb[2]-pb[0];ph=pb[3]-pb[1]
+        if pw < 150 or (hb[3]-hb[1]) < .28*ph or (hb[2]-hb[0])*(hb[3]-hb[1]) < .05*pw*ph:
+            continue
+        if len(checked_hats)>=2: break
+        x1,y1,x2,y2=max(0,pb[0]),max(0,pb[1]),min(w,pb[2]),min(h,pb[3])
+        entry=next((c for c in getattr(tracker,"_hat_check_cache",[]) if 0<=frame_idx-c["frame"]<15 and iou_score(pb,c["bbox"])>=.7),None)
+        if entry is None:
+            supported=False
+            for result in _model.predict(source=frame_bgr[y1:y2,x1:x2],conf=.25,verbose=False):
+                if result.boxes is None: continue
+                for box in result.boxes:
+                    if result.names[int(box.cls.item())]!="Hardhat" or float(box.conf.item())<.5: continue
+                    b=box.xyxy[0].tolist();mapped=[b[0]+x1,b[1]+y1,b[2]+x1,b[3]+y1]
+                    if iou_score(mapped,hb)>=.2: supported=True
+            entry={"frame":frame_idx,"bbox":pb,"supported":supported}
+        checked_hats.append(entry)
+        if not entry["supported"]: uncertain_hats.append(hat)
+    tracker._hat_check_cache=checked_hats
+    uncertain_ids={id(d) for d in uncertain_hats}
+    raw_detections=[d for d in raw_detections if id(d) not in uncertain_ids]
     claimed_vests = [d for d in raw_detections if d["label"] == "Safety Vest"]
     removed_vests = set()
     crop_negatives = []
@@ -894,23 +955,53 @@ def smart_detect_and_annotate(
         if (wid, lbl) in worker_violation_pairs_in_frame:
             continue
 
-        worker_violation_pairs_in_frame.add((wid, lbl))
-
         local_env = evaluate_lighting_and_glare(
             frame_bgr,
             target_bbox=worker_bbox,
             precomputed_gray=gray_frame,
             global_stats=global_stats,
         )
-        required_conf = conf_threshold + local_env["conf_penalty"]
+        # Detection sensitivity controls admission; the separate auto-confirm
+        # threshold controls pending/confirmed. Do not silently discard weak
+        # NO-* predictions with class-specific 75% floors or lighting penalties.
+        required_conf = conf_threshold
         safe_label = {"NO-Hardhat": "Hardhat", "NO-Safety Vest": "Safety Vest", "NO-Mask": "Mask"}[lbl]
-        if any(item["label"] == safe_label and safe_owners.get(id(item)) == wid for item in valid_safe_items):
+        # Verify uncertain negatives on the associated worker, not another
+        # worker in the same frame. Explicit positive crop evidence can reject
+        # a false alarm; absence of a positive is never proof of a violation.
+        if conf < 0.75:
+            cache = getattr(tracker, "_negative_check_cache", {})
+            cache = {k:v for k,v in cache.items() if 0 <= frame_idx-v["frame"] < 15}
+            entry = cache.get(wid)
+            if entry is None or iou_score(entry["bbox"], worker_bbox) < .7:
+                x1,y1,x2,y2 = max(0,worker_bbox[0]),max(0,worker_bbox[1]),min(w,worker_bbox[2]),min(h,worker_bbox[3])
+                items=[]
+                for result in _model.predict(source=frame_bgr[y1:y2,x1:x2], conf=.25, verbose=False):
+                    if result.boxes is None: continue
+                    for box in result.boxes:
+                        b=box.xyxy[0].tolist()
+                        items.append((result.names[int(box.cls.item())],float(box.conf.item()),
+                                      [b[0]/(x2-x1),b[1]/(y2-y1),b[2]/(x2-x1),b[3]/(y2-y1)]))
+                entry={"frame":frame_idx,"bbox":worker_bbox,"items":items}
+                cache[wid]=entry
+            tracker._negative_check_cache=cache
+            positives=[];negatives=[]
+            for name,score,rb in entry["items"]:
+                x1,y1,x2,y2=worker_bbox
+                mapped=[x1+rb[0]*(x2-x1),y1+rb[1]*(y2-y1),x1+rb[2]*(x2-x1),y1+rb[3]*(y2-y1)]
+                if iou_score(mapped,d["bbox"]) < .1: continue
+                if name==safe_label: positives.append(score)
+                if name==lbl: negatives.append(score)
+            if max(positives,default=0) >= .5 and max(positives) >= max(negatives,default=0):
+                tracker.observations.pop((wid,lbl),None)
+                continue
+        if any(item["label"] == safe_label and safe_owners.get(id(item)) == wid and item["confidence"] >= conf for item in valid_safe_items):
             tracker.observations.pop((wid, lbl), None)
             continue
 
         if lbl == "NO-Hardhat":
             has_hat_on_worker = any(
-                safe_owners.get(id(h_item)) == wid and (
+                safe_owners.get(id(h_item)) == wid and h_item["confidence"] >= conf and (
                 box_overlap_ratio(d["bbox"], h_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(h_item["bbox"], worker_bbox) > 0.45
@@ -919,12 +1010,12 @@ def smart_detect_and_annotate(
                 )
                 for h_item in safe_hardhats
             )
-            if has_hat_on_worker or conf < max(0.50 if distant_person else 0.55, required_conf):
+            if has_hat_on_worker or conf < required_conf:
                 continue
 
         elif lbl == "NO-Safety Vest":
             has_vest_on_worker = any(
-                safe_owners.get(id(v_item)) == wid and (
+                safe_owners.get(id(v_item)) == wid and v_item["confidence"] >= conf and (
                 box_overlap_ratio(d["bbox"], v_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(v_item["bbox"], worker_bbox) > 0.40
@@ -933,15 +1024,13 @@ def smart_detect_and_annotate(
                 )
                 for v_item in safe_vests
             )
-            min_vest_conf = max(0.60 if distant_person else (0.65 if d.get("crop_disagreement") else 0.75), required_conf)
-            if local_env["is_glare"]:
-                min_vest_conf = max(min_vest_conf, 0.80)
+            min_vest_conf = required_conf
             if has_vest_on_worker or conf < min_vest_conf:
                 continue
 
         elif lbl == "NO-Mask":
             has_mask_on_worker = any(
-                safe_owners.get(id(m_item)) == wid and (
+                safe_owners.get(id(m_item)) == wid and m_item["confidence"] >= conf and (
                 box_overlap_ratio(d["bbox"], m_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(m_item["bbox"], worker_bbox) > 0.45
@@ -950,7 +1039,7 @@ def smart_detect_and_annotate(
                 )
                 for m_item in safe_masks
             )
-            if has_mask_on_worker or conf < max(0.75, required_conf):
+            if has_mask_on_worker or conf < required_conf:
                 continue
 
         # A partial/occluded person is insufficient evidence for a violation.
@@ -992,7 +1081,15 @@ def smart_detect_and_annotate(
         worker_violation_pairs_in_frame.add((wid, lbl))
 
         already_logged = tracker.is_already_logged(wid, lbl, worker_center, w, h, frame_idx=frame_idx)
+        if not hasattr(tracker, "_event_refs"):
+            tracker._event_refs = {}
+        event_ref = tracker._event_refs.setdefault((wid, lbl), {})
+        upgrade_pending = (already_logged and event_ref.get("status") == "pending"
+                           and event_ref.get("event_id") is not None
+                           and conf >= auto_confirm_threshold)
         det_record = {
+            "event_ref": event_ref,
+            "upgrade_event_id": event_ref.get("event_id") if upgrade_pending else None,
             "label": lbl,
             "confidence": conf,
             "bbox": d["bbox"],
@@ -1008,7 +1105,7 @@ def smart_detect_and_annotate(
         }
         display_violations.append(det_record)
 
-        if not already_logged:
+        if not already_logged or upgrade_pending:
             tracker.mark_logged(wid, lbl, worker_center, frame_idx=frame_idx)
             new_violations_to_log.append(det_record)
 
@@ -1037,6 +1134,11 @@ def smart_detect_and_annotate(
         cv2.rectangle(annotated, (x1, y1), (x2, y2), s_color, 2)
         _draw_smart_label(annotated, s_text, x1, y1, s_color, font_scale=0.46, thickness=1)
 
+    for item in uncertain_hats:
+        x1,y1,x2,y2=item["bbox"]
+        cv2.rectangle(annotated,(x1,y1),(x2,y2),(0,180,255),2)
+        _draw_smart_label(annotated,"MU: CAN KIEM TRA",x1,y1,(0,180,255),font_scale=.46)
+
     viol_vn_map = {
         "NO-Hardhat": "VI PHAM: Khong mu",
         "NO-Safety Vest": "VI PHAM: Khong ao",
@@ -1051,7 +1153,7 @@ def smart_detect_and_annotate(
 
         v_color = (0, 0, 255)
         lock_note = " [Da ghi nhan]" if v_item["already_logged"] else ""
-        label_text = "CAN DUYET: Kiem tra ao" if v_item.get("crop_disagreement") else viol_vn_map.get(v_item["label"], v_item["label"])
+        label_text = viol_vn_map.get(v_item["label"], v_item["label"])
         v_text = f"{label_text} ({v_item['confidence']:.0%}){lock_note}"
         cv2.rectangle(annotated, (x1, y1), (x2, y2), v_color, 3)
         _draw_smart_label(annotated, v_text, x1, y1 + (stack_idx * 22), v_color, font_scale=0.50, thickness=2)
@@ -1081,9 +1183,38 @@ def save_new_violations_to_db(
         wid = v.get("worker_id", 1)
 
         initial_status = classify_event_status(conf, auto_confirm_threshold)
-        new_id = insert_event(timestamp=now_str, violation_type=v_type, status=initial_status)
+        upgrade_id = v.get("upgrade_event_id")
+        previous_meta = None
+        if upgrade_id is not None:
+            if initial_status != "confirmed":
+                continue
+            previous_path = EVIDENCE_DIR / f"event_{int(upgrade_id)}.json"
+            try:
+                previous_meta = json.loads(previous_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            # Never override a human decision or an event from another worker/type.
+            if (previous_meta.get("status_origin") != "ai_pending"
+                    or previous_meta.get("violation_type") != v_type
+                    or previous_meta.get("worker_id") != f"CN #{wid:02d}"):
+                v.get("event_ref", {})["status"] = "locked"
+                continue
+            with sqlite3.connect(DB_PATH) as connection:
+                changed = connection.execute(
+                    "UPDATE events SET status='confirmed' WHERE event_id=? AND status='pending'",
+                    (int(upgrade_id),),
+                ).rowcount
+            if not changed:
+                v.get("event_ref", {})["status"] = "locked"
+                continue
+            new_id = int(upgrade_id)
+        else:
+            new_id = insert_event(timestamp=now_str, violation_type=v_type, status=initial_status)
 
         img_path = EVIDENCE_DIR / f"event_{new_id}.jpg"
+        if previous_meta is not None and img_path.is_file():
+            original_evidence = EVIDENCE_DIR / f"event_{new_id}_before_auto_confirm.jpg"
+            original_evidence.write_bytes(img_path.read_bytes())
         cv2.imwrite(str(img_path), annotated_bgr)
 
         meta_path = EVIDENCE_DIR / f"event_{new_id}.json"
@@ -1113,7 +1244,21 @@ def save_new_violations_to_db(
             "verification_policy": "confidence_threshold_v6",
             "crop_disagreement": v.get("crop_disagreement", False),
         }
+        if previous_meta is not None:
+            meta_data["initial_status"] = previous_meta.get("initial_status", "pending")
+            meta_data["detected_at"] = previous_meta.get("detected_at", meta_data["detected_at"])
+            meta_data["upgraded_from_pending"] = True
+            meta_data["previous_evidence"] = f"event_{new_id}_before_auto_confirm.jpg"
+            meta_data["decision_history"] = previous_meta.get("decision_history", []) + [{
+                "origin": "ai_auto", "timestamp": detected_at.isoformat(timespec="seconds"),
+                "previous_confidence": previous_meta.get("confidence"),
+                "previous_frame_idx": previous_meta.get("frame_idx"),
+                "confidence": float(conf), "frame_idx": frame_idx,
+                "reason": "later_frame_crossed_threshold",
+            }]
+        meta_data["evidence_captured_at"] = detected_at.isoformat(timespec="seconds")
         meta_path.write_text(json.dumps(meta_data, ensure_ascii=False), encoding="utf-8")
+        v.setdefault("event_ref", {}).update(event_id=new_id, status=initial_status)
 
         if initial_status == "confirmed":
             auto_confirmed_list.append(meta_data)

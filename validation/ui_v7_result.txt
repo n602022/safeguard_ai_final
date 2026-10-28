@@ -1,0 +1,6 @@
+PASS render review
+PASS render chat
+PASS render docs
+PASS render scan
+PASS render dashboard
+Browser visual test unavailable: Chromium download failed. DOM freeze not visually verified.

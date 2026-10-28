@@ -1,0 +1,32 @@
+[
+  {
+    "source": "upload/sample_4_no_hardhat_mask.mp4",
+    "fps": 23.976023976023978,
+    "frame": 65,
+    "label": "NO-Hardhat",
+    "confidence": 0.7886,
+    "status": "confirmed",
+    "support_frames": 8,
+    "upgrade_event_id": null
+  },
+  {
+    "source": "upload/sample_5_heavy.mp4",
+    "fps": 24.0,
+    "frame": 85,
+    "label": "NO-Safety Vest",
+    "confidence": 0.7175093293190002,
+    "status": "pending",
+    "support_frames": 8,
+    "upgrade_event_id": null
+  },
+  {
+    "source": "upload/sample_5_heavy.mp4",
+    "fps": 24.0,
+    "frame": 95,
+    "label": "NO-Safety Vest",
+    "confidence": 0.7925620675086975,
+    "status": "confirmed",
+    "support_frames": 10,
+    "upgrade_event_id": 2
+  }
+]
