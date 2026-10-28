@@ -7,6 +7,7 @@ ui_pages/review.py — Trang Duyệt vi phạm & Điều khiển khẩn cấp Đ
 - Giữ bảng `Lịch sử sự kiện đã duyệt` gọn gàng trong ngăn kéo ở cuối trang (đã bỏ phần sửa trạng thái trùng lặp).
 """
 import datetime
+from app_clock import app_now, app_today, normalize_timestamp, format_timestamp_vn
 import math
 from pathlib import Path
 import re
@@ -170,7 +171,7 @@ def _confirm_estop_dialog(event_id: int, cam: str, worker: str, mark_confirmed: 
                 "event_id": event_id,
                 "camera": cam,
                 "worker_id": worker,
-                "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                "time": app_now().strftime("%H:%M:%S"),
             }
             st.session_state.iot_action_banner = {
                 "type": "estop",
@@ -305,7 +306,7 @@ def render_review_page(raw_events: list, enriched_events: list):
                                     <div class="sg-incident-body">
                                         <div class="sg-incident-badges">
                                             <span class="sg-badge {ev['severity']}">{ev['severity_label']}</span>
-                                            <span class="sg-badge {ev['status']}" style="margin-left:auto;">{ev['status_badge_tv']}</span>
+                                            <span class="sg-badge {ev['status']}" title="{ev.get('status_origin_label', 'Chưa có nhật ký nguồn quyết định')}" style="margin-left:auto;">{ev['status_badge_tv']}</span>
                                         </div>
                                         <div class="sg-incident-title" title="#{eid} · {ev['title_tv']}">#{eid} · {ev['title_tv']}</div>
                                         <div class="sg-incident-foot">
@@ -443,7 +444,7 @@ def render_review_page(raw_events: list, enriched_events: list):
                                 <div class="sg-eyebrow" style="margin:0;">SỰ KIỆN #{cur_id}</div>
                                 <h3 style="margin:3px 0 0;font-size:17px;color:var(--text);">{info_loi['ten_tv']}</h3>
                             </div>
-                            <span class="sg-badge {target_ev['status']}">{target_ev['status_badge_tv']}</span>
+                            <span class="sg-badge {target_ev['status']}" title="{target_ev.get('status_origin_label', 'Chưa có nhật ký nguồn quyết định')}">{target_ev['status_badge_tv']}</span>
                         </div>
                         <div class="sg-detail-list">
                             <span class="sg-label">Công nhân</span><b>{target_ev['worker_id']}</b>

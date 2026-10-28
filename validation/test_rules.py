@@ -1,7 +1,11 @@
 import ast,math
 from types import SimpleNamespace
 import cv2,numpy as np
-s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
+import sys
+sys.path.insert(0,str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+from app_clock import app_now
+
+s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate','refine_distant_detections'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
 ns={'math':math,'cv2':cv2,'np':np};exec(compile(s,'core','exec'),ns)
 labels=['Person','NO-Hardhat','Hardhat','NO-Safety Vest','Safety Vest']
 def set_dets(ds):
@@ -15,40 +19,55 @@ set_dets([p,v,('Hardhat',.3,[110,27,155,65])]);assert not run(),'low confidence 
 set_dets([p,v]);assert len(run())==1,'positive image control'
 t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in range(0,35,5): assert not run(t,i,False)
-vs=run(t,35,False);assert len(vs)==1 and vs[0]['auto_confirm_eligible']
+vs=run(t,35,False);assert len(vs)==1 and vs[0]['temporal_quality_pass']
 assert not run(t,40,False),'duplicate'
 set_dets([p,('NO-Hardhat',.8,[115,30,150,65])])
 t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in range(0,35,5):assert not run(t,i,False)
-assert not run(t,35,False)[0]['auto_confirm_eligible'],'weak evidence must remain pending'
-set_dets([p,v]); assert not run()[0]['auto_confirm_eligible'],'single image must remain pending'
+assert not run(t,35,False)[0]['temporal_quality_pass'],'weak evidence fails temporal verification'
+set_dets([p,v]); assert not run()[0]['temporal_quality_pass'],'single image has no temporal verification'
 t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in [0,5,10]: assert not run(t,i,False)
 set_dets([p]);assert not run(t,15,False)
 set_dets([p,v])
 for i in [20,25,30,35,40,45,50]:assert not run(t,i,False),'missing frame must reset support'
-assert run(t,55,False)[0]['auto_confirm_eligible']
+assert run(t,55,False)[0]['temporal_quality_pass']
 original_frame=f
 f=np.full((300,300,3),30,dtype=np.uint8)
 t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in range(0,35,5):assert not run(t,i,False)
-assert not run(t,35,False)[0]['auto_confirm_eligible'],'blur/low light must block auto-confirm'
+assert not run(t,35,False)[0]['temporal_quality_pass'],'blur/low light fails temporal quality'
 f=original_frame
 set_dets([p,v]);t=ns['MultiPersonTrackerAndDeduplicator']()
 for i in [0,5,10]:assert not run(t,i,False)
 set_dets([p,v,('Hardhat',.4,[110,27,155,65])]);assert not run(t,15,False)
 set_dets([p,v])
 for i in [20,25,30,35,40,45,50]:assert not run(t,i,False)
-assert run(t,55,False)[0]['auto_confirm_eligible']
+assert run(t,55,False)[0]['temporal_quality_pass']
+# A small distant head box previously rejected by absolute pixel thresholds.
+small_person=('Person',.9,[80,25,110,110])
+small_violation=('NO-Hardhat',.8,[89,28,101,38])
+set_dets([small_person,small_violation])
+assert any(v['label']=='NO-Hardhat' for v in run()),'small head must be retained'
+t=ns['MultiPersonTrackerAndDeduplicator']()
+for i in range(0,35,5): assert not run(t,i,False)
+far=run(t,35,False)
+assert far and not any(v['temporal_quality_pass'] for v in far),'far detections do not pass temporal quality'
+set_dets([small_person,small_violation,('Hardhat',.36,[89,28,101,38])])
+assert run(),'weak distant PPE must not erase a stronger violation'
+set_dets([small_person,small_violation,('Hardhat',.8,[89,28,101,38])])
+assert not run(),'clear PPE must still veto a distant violation'
 # Exercise persistence policy with temporary evidence and an in-memory insert stub.
 import tempfile, pathlib, datetime, json
 saved=[]
-ns.update(datetime=datetime,json=json,EVIDENCE_DIR=pathlib.Path(tempfile.mkdtemp()),insert_event=lambda **kw: saved.append(kw) or len(saved),_clear_runtime_caches=lambda:None)
+ns.update(app_now=app_now,datetime=datetime,json=json,EVIDENCE_DIR=pathlib.Path(tempfile.mkdtemp()),insert_event=lambda **kw: saved.append(kw) or len(saved),_clear_runtime_caches=lambda:None)
 tree=ast.parse(open(str(pathlib.Path(__file__).resolve().parents[1] / 'core_logic.py')).read())
 node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='save_new_violations_to_db')
+policy=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='classify_event_status')
+exec(compile(ast.Module(body=[policy],type_ignores=[]),'policy','exec'),ns)
 exec(compile(ast.Module(body=[node],type_ignores=[]),'save','exec'),ns)
 ns['save_new_violations_to_db'](vs,f,auto_confirm_threshold=.75)
 assert saved[-1]['status']=='confirmed'
 ns['save_new_violations_to_db'](vs,f,auto_confirm_threshold=.95)
 assert saved[-1]['status']=='pending'
-print('PASS: PPE veto, orphan rejection, positive image, temporal auto-confirm, lower confidence pending, single image pending, missing support reset, duplicate suppression, database status threshold')
+print('PASS: PPE veto, orphan rejection, positive image, temporal quality diagnostics, threshold policy persistence, missing support reset, duplicate suppression, database status threshold')

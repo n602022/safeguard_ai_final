@@ -16,6 +16,7 @@ core_logic.py — Module nghiệp vụ lõi dùng chung cho toàn bộ hệ th�
 """
 import base64
 import datetime
+from app_clock import app_now, app_today, normalize_timestamp, format_timestamp_vn
 import io
 import json
 import math
@@ -111,9 +112,34 @@ def _clear_runtime_caches():
 
 
 def update_event_status(event_id: int, new_status: str):
-    """Cập nhật trạng thái sự kiện trong SQLite và làm mới ngay cache RAM để các trang đồng bộ tức thì."""
-    _db_update_event_status(int(event_id), new_status)
+    """Record explicit reviewer decisions separately from initial AI triage."""
+    eid = int(event_id)
+    if not _db_update_event_status(eid, new_status):
+        raise ValueError(f"Không tìm thấy sự kiện #{eid} để cập nhật.")
+    path = EVIDENCE_DIR / f"event_{eid}.json"
+    meta = {}
+    if path.is_file():
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(meta, dict): meta = {}
+        except (ValueError, OSError):
+            meta = {}
+    meta.setdefault("decision_history", []).append({
+        "status": new_status, "origin": "human",
+        "at": app_now().isoformat(timespec="seconds"),
+    })
+    meta["status_origin"] = "human"
+    meta["current_status"] = new_status
+    path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     _clear_runtime_caches()
+
+
+def classify_event_status(confidence: float, threshold: float) -> str:
+    """Single source of truth: confidence >= configured threshold is confirmed."""
+    confidence, threshold = float(confidence), float(threshold)
+    if not (math.isfinite(confidence) and math.isfinite(threshold) and 0 <= confidence <= 1 and 0 <= threshold <= 1):
+        raise ValueError("Điểm nhận diện và ngưỡng phải nằm trong khoảng 0–1.")
+    return "confirmed" if confidence >= threshold else "pending"
 
 
 def clean_html(raw_html: str) -> str:
@@ -192,10 +218,11 @@ def get_active_violation_types():
 
 
 def get_effective_auto_confirm():
-    """Đảm bảo ngưỡng tự động xác nhận luôn hợp lệ so với độ nhạy phát hiện tối thiểu."""
-    sens = float(st.session_state.get("ai_sensitivity", 0.50))
-    auto_c = float(st.session_state.get("auto_confirm_level", 0.75))
-    return max(auto_c, round(min(0.95, sens + 0.05), 2))
+    """Use the selected threshold exactly; detection sensitivity is independent."""
+    value = float(st.session_state.get("auto_confirm_level", 0.75))
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError("Ngưỡng tự xác nhận không hợp lệ.")
+    return value
 
 
 def play_alert_beep():
@@ -668,6 +695,38 @@ def _draw_smart_label(img, text: str, x1: int, y1: int, bg_color: tuple, font_sc
     )
 
 
+def refine_distant_detections(frame, detections, tracker, frame_idx):
+    """Recheck at most three small persons at crop scale; never infer absent PPE."""
+    h, w = frame.shape[:2]
+    people = [d for d in detections if d["label"] == "Person" and d["confidence"] >= 0.45
+              and 28 <= d["bbox"][3]-d["bbox"][1] < 140 and d["bbox"][2]-d["bbox"][0] >= 10]
+    old_cache = getattr(tracker, "_distant_crop_cache", [])
+    new_cache, additions = [], []
+    for person in sorted(people, key=lambda x:-x["confidence"])[:3]:
+        pb = person["bbox"]
+        pw, ph = pb[2]-pb[0], pb[3]-pb[1]
+        x1,y1=max(0,int(pb[0]-.2*pw)),max(0,int(pb[1]-.1*ph))
+        x2,y2=min(w,int(pb[2]+.2*pw)),min(h,int(pb[3]+.1*ph))
+        cached = next((c for c in old_cache if 0 <= frame_idx-c["frame"] < 15 and iou_score(pb,c["bbox"]) >= 0.7),None)
+        if cached is None:
+            items=[]
+            for result in _model.predict(source=frame[y1:y2,x1:x2],conf=0.3,verbose=False):
+                if result.boxes is None: continue
+                for box in result.boxes:
+                    label=result.names[int(box.cls.item())]; confidence=float(box.conf.item())
+                    if label not in {"Hardhat","Safety Vest","Mask","NO-Hardhat","NO-Safety Vest","NO-Mask"} or confidence < .5: continue
+                    b=box.xyxy[0].tolist()
+                    items.append((label,confidence,[b[0]/(x2-x1),b[1]/(y2-y1),b[2]/(x2-x1),b[3]/(y2-y1)]))
+            cached={"frame":frame_idx,"bbox":pb,"items":items}
+        new_cache.append(cached)
+        for label,confidence,b in cached["items"]:
+            bbox=[round(x1+b[0]*(x2-x1)),round(y1+b[1]*(y2-y1)),round(x1+b[2]*(x2-x1)),round(y1+b[3]*(y2-y1))]
+            if box_inclusion_ratio(bbox,pb) >= .6 and is_anatomically_valid(bbox,pb,label):
+                additions.append({"label":label,"confidence":confidence,"bbox":bbox,"distant_roi":True})
+    tracker._distant_crop_cache=new_cache
+    return detections+additions
+
+
 def smart_detect_and_annotate(
     frame_bgr,
     conf_threshold=0.50,
@@ -698,12 +757,56 @@ def smart_detect_and_annotate(
     frame_env = evaluate_lighting_and_glare(frame_bgr, precomputed_gray=gray_frame)
     global_stats = frame_env.get("_global_stats")
 
+    # Recheck a claimed vest at person scale. Disagreement is evidence for
+    # human review, never grounds for automatic confirmation.
+    if tracker is None:
+        tracker = MultiPersonTrackerAndDeduplicator()
+    if not hasattr(tracker, "_vest_crop_cache"):
+        tracker._vest_crop_cache = []
+    raw_detections = refine_distant_detections(frame_bgr, raw_detections, tracker, frame_idx)
+    persons_for_crop = [d for d in raw_detections if d["label"] == "Person" and d["confidence"] >= 0.5]
+    claimed_vests = [d for d in raw_detections if d["label"] == "Safety Vest"]
+    removed_vests = set()
+    crop_negatives = []
+    used_cache = []
+    for person in sorted(persons_for_crop, key=lambda d: -d["confidence"])[:3]:
+        pb = person["bbox"]
+        associated = [v for v in claimed_vests if box_inclusion_ratio(v["bbox"], pb) >= 0.6 and is_anatomically_valid(v["bbox"], pb, "Safety Vest")]
+        x1, y1, x2, y2 = max(0,pb[0]), max(0,pb[1]), min(w,pb[2]), min(h,pb[3])
+        if not associated or x2-x1 < 45 or y2-y1 < 100:
+            continue
+        cached = next((entry for entry in tracker._vest_crop_cache if 0 <= frame_idx-entry["frame"] < 15 and iou_score(pb,entry["bbox"]) >= 0.7), None)
+        if cached is None:
+            crop_results = _model.predict(source=frame_bgr[y1:y2, x1:x2], conf=0.25, verbose=False)
+            positives, negatives = [], []
+            for result in crop_results:
+                if result.boxes is None:
+                    continue
+                for box in result.boxes:
+                    label = result.names[int(box.cls.item())]
+                    confidence = float(box.conf.item())
+                    if label == "Safety Vest":
+                        positives.append(confidence)
+                    if label == "NO-Safety Vest" and confidence >= 0.65:
+                        coords = box.xyxy[0].tolist()
+                        relative = [coords[0]/(x2-x1),coords[1]/(y2-y1),coords[2]/(x2-x1),coords[3]/(y2-y1)]
+                        negatives.append((confidence,relative))
+            cached = {"frame":frame_idx,"bbox":pb,"negative":max(negatives, default=None),"positive":max(positives,default=0.0)}
+        used_cache.append(cached)
+        if cached["negative"] and cached["positive"] < 0.5:
+            confidence, rb = cached["negative"]
+            bbox = [round(x1+rb[0]*(x2-x1)),round(y1+rb[1]*(y2-y1)),round(x1+rb[2]*(x2-x1)),round(y1+rb[3]*(y2-y1))]
+            removed_vests.update(id(v) for v in associated)
+            crop_negatives.append({"label":"NO-Safety Vest","confidence":confidence,"bbox":bbox,"crop_disagreement":True})
+    tracker._vest_crop_cache = used_cache
+    raw_detections = [d for d in raw_detections if id(d) not in removed_vests] + crop_negatives
+
     safe_hardhats = [d for d in raw_detections if d["label"] == "Hardhat"]
     safe_vests = [d for d in raw_detections if d["label"] == "Safety Vest"]
     safe_masks = [d for d in raw_detections if d["label"] == "Mask"]
     person_dets = [
         d for d in raw_detections
-        if d["label"] == "Person" and d["confidence"] >= 0.45 and (d["bbox"][2] - d["bbox"][0]) >= 22 and (d["bbox"][3] - d["bbox"][1]) >= 30
+        if d["label"] == "Person" and d["confidence"] >= 0.45 and (d["bbox"][2] - d["bbox"][0]) >= 10 and (d["bbox"][3] - d["bbox"][1]) >= 28
     ]
 
     if tracker is None:
@@ -717,6 +820,10 @@ def smart_detect_and_annotate(
     for item in valid_safe_items:
         choices = []
         for wk in tracked_workers:
+            if item.get("distant_roi") and wk["bbox"][3]-wk["bbox"][1] >= 140:
+                continue
+            if wk["bbox"][3]-wk["bbox"][1] < 140 and item["confidence"] < 0.5:
+                continue
             if box_inclusion_ratio(item["bbox"], wk["bbox"]) < 0.60:
                 continue
             if not is_anatomically_valid(item["bbox"], wk["bbox"], item["label"]):
@@ -744,7 +851,7 @@ def smart_detect_and_annotate(
         bx1, by1, bx2, by2 = d["bbox"]
         bw, bh = bx2 - bx1, by2 - by1
 
-        if bw < 18 or bh < 18:
+        if bw < 5 or bh < 5:
             continue
         if (bx2 >= w - 10 or bx1 <= 10) and bw < (w * 0.12):
             continue
@@ -755,6 +862,8 @@ def smart_detect_and_annotate(
         icx = (bx1 + bx2) / 2.0
 
         for wk in tracked_workers:
+            if d.get("distant_roi") and wk["bbox"][3]-wk["bbox"][1] >= 140:
+                continue
             inc = box_inclusion_ratio(d["bbox"], wk["bbox"])
             ov = box_overlap_ratio(d["bbox"], wk["bbox"])
             base_ov = max(inc, ov)
@@ -777,6 +886,10 @@ def smart_detect_and_annotate(
         wid = matched_worker["worker_id"]
         worker_bbox = matched_worker["bbox"]
         worker_center = matched_worker["center"]
+
+        distant_person = worker_bbox[3]-worker_bbox[1] < 140
+        if not distant_person and (bw < 18 or bh < 18):
+            continue
 
         if (wid, lbl) in worker_violation_pairs_in_frame:
             continue
@@ -806,7 +919,7 @@ def smart_detect_and_annotate(
                 )
                 for h_item in safe_hardhats
             )
-            if has_hat_on_worker or conf < max(0.55, required_conf):
+            if has_hat_on_worker or conf < max(0.50 if distant_person else 0.55, required_conf):
                 continue
 
         elif lbl == "NO-Safety Vest":
@@ -820,7 +933,7 @@ def smart_detect_and_annotate(
                 )
                 for v_item in safe_vests
             )
-            min_vest_conf = max(0.75, required_conf)
+            min_vest_conf = max(0.60 if distant_person else (0.65 if d.get("crop_disagreement") else 0.75), required_conf)
             if local_env["is_glare"]:
                 min_vest_conf = max(min_vest_conf, 0.80)
             if has_vest_on_worker or conf < min_vest_conf:
@@ -842,7 +955,7 @@ def smart_detect_and_annotate(
 
         # A partial/occluded person is insufficient evidence for a violation.
         px1, py1, px2, py2 = worker_bbox
-        if py2 - py1 < 100 or px2 - px1 < 35:
+        if py2 - py1 < 28 or px2 - px1 < 10:
             continue
         if lbl == "NO-Safety Vest" and bh < (py2 - py1) * 0.18:
             continue
@@ -872,6 +985,7 @@ def smart_detect_and_annotate(
         auto_eligible = (
             not single_frame_mode and count >= 8 and span_seconds >= 0.6
             and observation["quality_ok"]
+            and not d.get("crop_disagreement", False)
             and verification_score >= (0.90 if lbl == "NO-Mask" else 0.85)
         )
         worker_having_violation.add(wid)
@@ -885,7 +999,8 @@ def smart_detect_and_annotate(
             "worker_id": wid,
             "already_logged": already_logged,
             "env_status": local_env["status_text"],
-            "auto_confirm_eligible": auto_eligible,
+            "temporal_quality_pass": auto_eligible,
+            "crop_disagreement": bool(d.get("crop_disagreement", False)),
             "verification_score": verification_score,
             "support_frames": count,
             "support_seconds": round(span_seconds, 3),
@@ -899,9 +1014,9 @@ def smart_detect_and_annotate(
 
     annotated = frame_bgr.copy()
     label_vn_map = {
-        "Hardhat": "An toan: Mu bao ho",
-        "Safety Vest": "An toan: Ao phan quang",
-        "Mask": "An toan: Khau trang",
+        "Hardhat": "AI: Mu bao ho",
+        "Safety Vest": "AI: Ao phan quang",
+        "Mask": "AI: Khau trang",
     }
 
     for wk in tracked_workers:
@@ -936,7 +1051,8 @@ def smart_detect_and_annotate(
 
         v_color = (0, 0, 255)
         lock_note = " [Da ghi nhan]" if v_item["already_logged"] else ""
-        v_text = f"{viol_vn_map.get(v_item['label'], v_item['label'])} ({v_item['confidence']:.0%}){lock_note}"
+        label_text = "CAN DUYET: Kiem tra ao" if v_item.get("crop_disagreement") else viol_vn_map.get(v_item["label"], v_item["label"])
+        v_text = f"{label_text} ({v_item['confidence']:.0%}){lock_note}"
         cv2.rectangle(annotated, (x1, y1), (x2, y2), v_color, 3)
         _draw_smart_label(annotated, v_text, x1, y1 + (stack_idx * 22), v_color, font_scale=0.50, thickness=2)
 
@@ -953,7 +1069,8 @@ def save_new_violations_to_db(
     fps=30.0,
 ):
     """Lưu các vi phạm mới vào safeguard.db và thư mục evidence/."""
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    detected_at = app_now()
+    now_str = detected_at.strftime("%Y-%m-%d %H:%M:%S")
     sec_in_video = frame_idx / max(1.0, float(fps or 30.0))
     auto_confirmed_list = []
     needs_human_list = []
@@ -963,7 +1080,7 @@ def save_new_violations_to_db(
         conf = v["confidence"]
         wid = v.get("worker_id", 1)
 
-        initial_status = "confirmed" if min(conf, v.get("verification_score", 0.0)) >= auto_confirm_threshold and v.get("auto_confirm_eligible", False) else "pending"
+        initial_status = classify_event_status(conf, auto_confirm_threshold)
         new_id = insert_event(timestamp=now_str, violation_type=v_type, status=initial_status)
 
         img_path = EVIDENCE_DIR / f"event_{new_id}.jpg"
@@ -972,20 +1089,29 @@ def save_new_violations_to_db(
         meta_path = EVIDENCE_DIR / f"event_{new_id}.json"
         meta_data = {
             "event_id": new_id,
+            "detected_at": detected_at.isoformat(timespec="seconds"),
+            "timestamp_timezone": "Asia/Ho_Chi_Minh",
             "worker_id": f"CN #{wid:02d}",
             "camera": camera_name,
             "frame_idx": frame_idx,
             "video_sec": round(sec_in_video, 1),
-            "confidence": round(conf, 2),
+            "confidence": float(conf),
             "violation_type": v_type,
             "env_status": v.get("env_status", "Ổn định"),
             "auto_triaged": initial_status == "confirmed",
+            "initial_status": initial_status,
+            "current_status": initial_status,
+            "status_origin": "ai_auto" if initial_status == "confirmed" else "ai_pending",
+            "triage_rule": "confidence_gte_selected_threshold_v6",
             "verification_score": v.get("verification_score", 0.0),
             "support_frames": v.get("support_frames", 1),
             "support_seconds": v.get("support_seconds", 0.0),
-            "verification_reason": v.get("verification_reason", "human_review_required"),
+            "verification_reason": "threshold_pass" if initial_status == "confirmed" else "below_selected_threshold",
+            "temporal_verification_reason": v.get("verification_reason", "not_recorded"),
+            "temporal_quality_pass": v.get("temporal_quality_pass", False),
             "auto_confirm_threshold": auto_confirm_threshold,
-            "verification_policy": "temporal_v3",
+            "verification_policy": "confidence_threshold_v6",
+            "crop_disagreement": v.get("crop_disagreement", False),
         }
         meta_path.write_text(json.dumps(meta_data, ensure_ascii=False), encoding="utf-8")
 
@@ -1038,7 +1164,7 @@ def record_iot_action(event_id, action_label):
                 meta = loaded
         except Exception:
             meta = {}
-    now_hm = datetime.datetime.now().strftime("%H:%M:%S")
+    now_hm = app_now().strftime("%H:%M:%S")
     meta["iot_action"] = f"{action_label} ({now_hm})"
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     _clear_runtime_caches()
@@ -1088,7 +1214,7 @@ def build_shift_csv_bytes(events_list):
 
         rows.append({
             "Mã sự kiện": eid,
-            "Thời điểm phát hiện": e.get("timestamp", ""),
+            "Thời điểm phát hiện": normalize_timestamp(e.get("timestamp", "")),
             "Vị trí Camera": cam_val,
             "Mã công nhân": worker_val,
             "Hành vi vi phạm": vtype_tv,
@@ -1261,10 +1387,7 @@ def get_cached_events_bundle() -> tuple[list, list, bool]:
 
 
 def fmt_ts_vn(ts) -> str:
-    """'2026-10-23 11:52:33' -> '23/10/2026 11:52:33' (định dạng ngày Việt Nam); giữ nguyên nếu không đúng mẫu."""
-    s = str(ts or "").strip()
-    m = re.match(r"^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)", s)
-    return f"{m.group(3)}/{m.group(2)}/{m.group(1)} {m.group(4)}" if m else s
+    return format_timestamp_vn(ts)
 
 
 def _build_enriched_events_internal(raw_events: list) -> list:
@@ -1293,7 +1416,7 @@ def _build_enriched_events_internal(raw_events: list) -> list:
 
         enriched.append({
             "event_id": eid,
-            "timestamp": e.get("timestamp", ""),
+            "timestamp": normalize_timestamp(e.get("timestamp", "")),
             "timestamp_vn": fmt_ts_vn(e.get("timestamp", "")),
             "violation_type": vtype,
             "title_tv": TEN_LOI_TV.get(vtype, vtype),
@@ -1312,6 +1435,11 @@ def _build_enriched_events_internal(raw_events: list) -> list:
             "env_status": str(meta.get("env_status", "Chưa có thông tin")),
             "iot_action": str(meta.get("iot_action", "Chưa kích hoạt")),
             "auto_triaged": bool(meta.get("auto_triaged", False)),
+            "status_origin_label": {
+                "ai_auto": "AI tự xác nhận theo ngưỡng đã chọn",
+                "ai_pending": "AI chuyển chờ giám sát duyệt",
+                "human": "Giám sát viên đã cập nhật trạng thái",
+            }.get(meta.get("status_origin"), "Dữ liệu cũ: chưa có nhật ký nguồn quyết định"),
             "img_path": img_path,
             "has_meta": bool(meta),
         })

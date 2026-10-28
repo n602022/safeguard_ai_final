@@ -132,23 +132,14 @@ def _cached_first_frame_preview(
     video_path_str: str,
     conf_threshold: float,
     active_violations_tuple: tuple[str, ...],
-    v_tag: int = 2,
+    v_tag: int = 4,
 ):
-    """
-    Lưu cache kết quả nhận diện YOLOv8 của khung hình đầu tiên theo (video, độ nhạy, loại lỗi):
-    Giúp mở trang Quét AI & Camera hoặc bấm chuyển đổi giữa Camera 01..05 mượt tức thì (< 2ms).
-    """
-    preview_tracker = MultiPersonTrackerAndDeduplicator()
+    """Cached raw preview: do not run inference while accepting an upload."""
     for _, frame in read_frames(video_path_str, frame_step=1, max_width=720):
-        frame = _normalize_scan_frame(frame)
-        annotated_bgr, _, worker_cnt, env_info = smart_detect_and_annotate(
-            frame,
-            conf_threshold=conf_threshold,
-            active_violation_types=active_violations_tuple,
-            tracker=preview_tracker,
-            frame_idx=1,
-            single_frame_mode=True,
-        )
+        annotated_bgr = _normalize_scan_frame(frame)
+        worker_cnt = 0
+        env_info = {"blur_score": 0, "glare_pct": 0, "is_glare": False, "is_blur": False,
+                    "status_text": "Xem trước video — nhấn Bắt đầu quét để phân tích AI"}
         ok, jpg_buf = cv2.imencode(".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 86])
         b64_uri = (
             "data:image/jpeg;base64," + base64.b64encode(jpg_buf.tobytes()).decode("ascii")
@@ -323,8 +314,8 @@ def render_scanner_page(raw_events: list):
                     <div class="sg-threshold-note">
                         <b>Quy tắc phân luồng</b>
                         <p>
-                            ≥{effective_auto_confirm:.0%} + kiểm chứng nhiều khung: tự xác nhận<br/>
-                            Chưa đủ điều kiện kiểm chứng: chờ duyệt
+                            ≥{effective_auto_confirm:.0%}: AI tự xác nhận<br/>
+                            &lt;{effective_auto_confirm:.0%}: chờ giám sát duyệt
                         </p>
                     </div>
                     """
@@ -498,10 +489,6 @@ def render_scanner_page(raw_events: list):
             )
 
         def run_video_scanner(video_path_str: str, cam_name: str, cam_short_tag: str):
-            info = get_video_info(video_path_str)
-            total_fr = info["total_frames"] if info and info["total_frames"] > 0 else 100
-            fps_val = info["fps"] if info and info["fps"] > 0 else 30.0
-
             act_c1, act_c2, act_c3 = st.columns([1.05, 0.95, 2.1], gap="small", vertical_alignment="center")
             with act_c1:
                 start_btn = st.button(
@@ -525,6 +512,9 @@ def render_scanner_page(raw_events: list):
                 st.session_state.scan_is_running = False
 
             if start_btn:
+                info = get_video_info(video_path_str)
+                total_fr = info["total_frames"] if info and info["total_frames"] > 0 else 100
+                fps_val = info["fps"] if info and info["fps"] > 0 else 30.0
                 st.session_state.scan_is_running = True
                 _render_monitor_header(cam_name, is_running=True)
                 tracker = MultiPersonTrackerAndDeduplicator()
@@ -599,8 +589,8 @@ def render_scanner_page(raw_events: list):
                 _render_monitor_header(cam_name, is_running=False)
                 b64_uri, worker_cnt, env_info = _cached_first_frame_preview(
                     video_path_str,
-                    float(ai_sensitivity),
-                    tuple(active_violations),
+                    0.0,
+                    (),
                 )
                 video_placeholder.markdown(
                     _build_monitor_frame_html(

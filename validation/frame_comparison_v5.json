@@ -1,0 +1,322 @@
+[
+  {
+    "source": "test1.jpeg",
+    "original": [],
+    "original_seconds": 4.748,
+    "patched": [],
+    "patched_seconds": 0.361
+  },
+  {
+    "source": "test2.jpeg",
+    "original": [],
+    "original_seconds": 0.158,
+    "patched": [],
+    "patched_seconds": 0.191
+  },
+  {
+    "source": "test3.jpeg",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.643,
+        "bbox": [
+          1685,
+          1097,
+          1799,
+          1265
+        ]
+      }
+    ],
+    "original_seconds": 0.165,
+    "patched": [],
+    "patched_seconds": 0.17
+  },
+  {
+    "source": "test4.JPG",
+    "original": [],
+    "original_seconds": 0.16,
+    "patched": [],
+    "patched_seconds": 0.238
+  },
+  {
+    "source": "sample_1_hd.mp4:0",
+    "original": [],
+    "original_seconds": 0.082,
+    "patched": [],
+    "patched_seconds": 0.19
+  },
+  {
+    "source": "sample_1_hd.mp4:60",
+    "original": [],
+    "original_seconds": 0.088,
+    "patched": [],
+    "patched_seconds": 0.271
+  },
+  {
+    "source": "sample_1_hd.mp4:121",
+    "original": [],
+    "original_seconds": 0.219,
+    "patched": [],
+    "patched_seconds": 0.39
+  },
+  {
+    "source": "sample_1_hd.mp4:182",
+    "original": [],
+    "original_seconds": 0.151,
+    "patched": [],
+    "patched_seconds": 0.07
+  },
+  {
+    "source": "sample_2_hd.mp4:0",
+    "original": [],
+    "original_seconds": 0.079,
+    "patched": [],
+    "patched_seconds": 0.049
+  },
+  {
+    "source": "sample_2_hd.mp4:77",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6976,
+        "bbox": [
+          609,
+          152,
+          651,
+          239
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6228,
+        "bbox": [
+          199,
+          126,
+          329,
+          263
+        ]
+      }
+    ],
+    "original_seconds": 0.076,
+    "patched": [],
+    "patched_seconds": 0.075
+  },
+  {
+    "source": "sample_2_hd.mp4:155",
+    "original": [],
+    "original_seconds": 0.165,
+    "patched": [],
+    "patched_seconds": 0.122
+  },
+  {
+    "source": "sample_2_hd.mp4:232",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.7949,
+        "bbox": [
+          313,
+          71,
+          383,
+          166
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6384,
+        "bbox": [
+          206,
+          101,
+          323,
+          229
+        ]
+      }
+    ],
+    "original_seconds": 0.115,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.7949,
+        "bbox": [
+          313,
+          71,
+          383,
+          166
+        ]
+      }
+    ],
+    "patched_seconds": 0.057
+  },
+  {
+    "source": "sample_3_vertical.mp4:0",
+    "original": [],
+    "original_seconds": 0.353,
+    "patched": [],
+    "patched_seconds": 0.258
+  },
+  {
+    "source": "sample_3_vertical.mp4:126",
+    "original": [],
+    "original_seconds": 0.055,
+    "patched": [],
+    "patched_seconds": 0.105
+  },
+  {
+    "source": "sample_3_vertical.mp4:252",
+    "original": [],
+    "original_seconds": 0.051,
+    "patched": [],
+    "patched_seconds": 0.118
+  },
+  {
+    "source": "sample_3_vertical.mp4:378",
+    "original": [],
+    "original_seconds": 0.068,
+    "patched": [],
+    "patched_seconds": 0.095
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:0",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7715,
+        "bbox": [
+          262,
+          195,
+          300,
+          220
+        ]
+      }
+    ],
+    "original_seconds": 0.151,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7715,
+        "bbox": [
+          262,
+          195,
+          300,
+          220
+        ]
+      }
+    ],
+    "patched_seconds": 0.153
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:152",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7319,
+        "bbox": [
+          324,
+          185,
+          355,
+          208
+        ]
+      }
+    ],
+    "original_seconds": 0.294,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7319,
+        "bbox": [
+          324,
+          185,
+          355,
+          208
+        ]
+      }
+    ],
+    "patched_seconds": 0.437
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:305",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.8055,
+        "bbox": [
+          334,
+          126,
+          366,
+          150
+        ]
+      }
+    ],
+    "original_seconds": 0.073,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.8055,
+        "bbox": [
+          334,
+          126,
+          366,
+          150
+        ]
+      }
+    ],
+    "patched_seconds": 0.11
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:458",
+    "original": [],
+    "original_seconds": 0.104,
+    "patched": [],
+    "patched_seconds": 0.062
+  },
+  {
+    "source": "sample_5_heavy.mp4:0",
+    "original": [],
+    "original_seconds": 0.091,
+    "patched": [],
+    "patched_seconds": 0.136
+  },
+  {
+    "source": "sample_5_heavy.mp4:107",
+    "original": [],
+    "original_seconds": 0.21,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.764117419719696,
+        "bbox": [
+          247,
+          24,
+          419,
+          177
+        ]
+      }
+    ],
+    "patched_seconds": 0.179
+  },
+  {
+    "source": "sample_5_heavy.mp4:215",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6977,
+        "bbox": [
+          180,
+          51,
+          382,
+          205
+        ]
+      }
+    ],
+    "original_seconds": 0.18,
+    "patched": [],
+    "patched_seconds": 0.058
+  },
+  {
+    "source": "sample_5_heavy.mp4:323",
+    "original": [],
+    "original_seconds": 0.437,
+    "patched": [],
+    "patched_seconds": 0.119
+  }
+]

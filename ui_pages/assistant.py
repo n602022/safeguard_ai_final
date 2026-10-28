@@ -6,6 +6,7 @@ ui_pages/assistant.py — Trang Trợ lý AI giám sát (AI Assistant V2).
 - Tích hợp huy hiệu ngữ cảnh `Đang tham chiếu: Mã #ID · Loại lỗi` kèm nút `Đổi / Xem #ID` gọn ngay trên thanh tiêu đề khung Chat.
 """
 import datetime
+from app_clock import app_now, app_today, normalize_timestamp, format_timestamp_vn
 import html as _html
 import streamlit as st
 from chatbot import ask_chatbot
@@ -147,7 +148,7 @@ def render_assistant_page(raw_events: list, enriched_events: list):
                 {
                     "question": active_prompt,
                     "answer": reply_text,
-                    "time": datetime.datetime.now().strftime("%H:%M:%S"),
+                    "time": app_now().strftime("%H:%M:%S"),
                 }
             )
 

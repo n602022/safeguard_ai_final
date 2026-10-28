@@ -1,0 +1,8 @@
+FRAME 55 [('NO-Safety Vest', 0.761, False)]
+FRAME 65 [('NO-Safety Vest', 0.764, False)]
+FRAME 75 [('NO-Safety Vest', 0.736, False)]
+UPLOAD sample_1_hd.mp4 MB 10.74 write_s 0.003 preview_s 0.174 valid True
+UPLOAD sample_2_hd.mp4 MB 6.27 write_s 0.003 preview_s 0.066 valid True
+UPLOAD sample_3_vertical.mp4 MB 8.45 write_s 0.003 preview_s 0.924 valid True
+UPLOAD sample_4_no_hardhat_mask.mp4 MB 18.11 write_s 0.006 preview_s 0.072 valid True
+UPLOAD sample_5_heavy.mp4 MB 49.54 write_s 0.017 preview_s 0.293 valid True

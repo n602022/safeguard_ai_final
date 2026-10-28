@@ -9,6 +9,7 @@ ui_pages/dashboard.py — Trang Tổng quan an toàn (Dashboard V2).
 - Bỏ nút "Mở trang duyệt vi phạm →" dư thừa ở đáy khung `Vi phạm gần đây`.
 """
 import datetime
+from app_clock import app_now, app_today, normalize_timestamp, format_timestamp_vn
 import re
 import streamlit as st
 from core_logic import (
@@ -83,7 +84,7 @@ def _filter_events_by_toolbar(enriched_events: list) -> list:
     cam_filter = st.session_state.get("dash_cam_filter", "all")
     status_filter = st.session_state.get("dash_status_filter", "all")
 
-    today = datetime.date.today()
+    today = app_today()
 
     filtered = []
     for ev in enriched_events:
@@ -320,7 +321,7 @@ def render_dashboard_page(raw_events: list, enriched_events: list):
             with fc3:
                 picked_date = st.date_input(
                     "Chọn ngày báo cáo",
-                    value=st.session_state.get("dash_custom_date") or datetime.date.today(),
+                    value=st.session_state.get("dash_custom_date") or app_today(),
                     key="dash_date_picker",
                 )
                 if st.checkbox("Lọc theo ngày này", value=(cur_range == "custom"), key="dash_apply_date"):
@@ -342,7 +343,7 @@ def render_dashboard_page(raw_events: list, enriched_events: list):
         st.download_button(
             label="Xuất báo cáo (.CSV)",
             data=build_shift_csv_bytes(filtered_events),
-            file_name=f"Bao_Cao_Vi_Pham_Ca_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            file_name=f"Bao_Cao_Vi_Pham_Ca_{app_now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
             width="stretch",
             key="dash_dl_csv",
@@ -351,7 +352,7 @@ def render_dashboard_page(raw_events: list, enriched_events: list):
         st.download_button(
             label="Tải bằng chứng (.ZIP)",
             data=build_evidence_zip_bytes(filtered_events),
-            file_name=f"Bang_Chung_Vi_Pham_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+            file_name=f"Bang_Chung_Vi_Pham_{app_now().strftime('%Y%m%d_%H%M')}.zip",
             mime="application/zip",
             width="stretch",
             key="dash_dl_zip",

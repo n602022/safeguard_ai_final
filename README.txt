@@ -1,35 +1,42 @@
-SAFEGUARD AI - Bản vá v3: tự xác nhận có kiểm chứng
+SAFEGUARD AI — Bản vá v6: giờ Việt Nam và phân luồng theo ngưỡng
 
-Cài đặt: giải nén, chép đè đúng thư mục trong dự án, khởi động lại Streamlit.
-Bản này bao gồm bản vá v2. Giữ nguyên best.pt, database và evidence hiện có.
-Không đổi bố cục. Chỉ cập nhật nội dung giải thích quy tắc ngay trong khung hiện có.
+CÀI ĐẶT
+Giải nén, chép đè đúng cấu trúc thư mục rồi khởi động lại Streamlit.
+Bản này bao gồm các sửa đổi trước. Không thay best.pt hay database/evidence.
+Cần chép cả app_clock.py mới và các file ui_pages đi kèm.
 
-TỰ XÁC NHẬN VIDEO
-- Ít nhất 8 lần quan sát liên tiếp cùng người, cùng loại lỗi.
-- Chuỗi kéo dài ít nhất 0,6 giây theo FPS video. Mất một lần quan sát hoặc có PPE đối chứng thì bắt đầu lại.
-- Mỗi khoảng cách quan sát không quá 30 frame nguồn.
-- Tất cả quan sát phải đủ sáng, không lóa/mờ, người đủ lớn và không chạm biên ảnh.
-- Điểm Person >=65%; từng điểm vi phạm >=85%, riêng NO-Mask >=90%.
-- Điểm thấp nhất trong chuỗi còn phải đạt ngưỡng người dùng chọn (75% là ngưỡng tối thiểu do người dùng đặt, không phải điều kiện duy nhất).
-- Thiếu bất kỳ điều kiện kiểm chứng nào: pending; đủ điều kiện: confirmed.
-- Ảnh tĩnh luôn pending do chưa có bằng chứng thời gian.
-- Đây là điểm mô hình chưa được hiệu chuẩn, không phải xác suất đúng đã đo.
+THỜI GIAN
+Toàn ứng dụng dùng UTC+7, không phụ thuộc giờ hệ điều hành/máy chủ.
+Đã đồng bộ thời điểm ghi sự kiện, nhật ký duyệt, lệnh loa/dừng khẩn cấp,
+chat, ngày bộ lọc dashboard, tên báo cáo và định dạng CSV.
+Sự kiện mới lưu detected_at có +07:00 và timestamp_timezone trong JSON.
+Timestamp có offset được đổi sang giờ Việt Nam trước khi hiển thị.
+Dữ liệu cũ không có múi giờ giữ nguyên: không tự cộng 7 giờ vì có thể đã là giờ VN.
 
-LƯU VẾT
-JSON evidence ghi verification_policy, verification_score, support_frames,
-support_seconds, verification_reason, auto_confirm_threshold và auto_triaged.
-Người giám sát có thể sửa lại sự kiện tự xác nhận bằng giao diện hiện có.
-Không sửa ngược trạng thái các sự kiện đã lưu từ trước.
+TRẠNG THÁI (CHÍNH SÁCH V6 THAY THẾ CÁC CỔNG V3–V5)
+Sau khi sự kiện vượt qua bộ lọc nhận diện và được ghi nhận:
+confidence >= ngưỡng người dùng chọn => confirmed;
+confidence < ngưỡng người dùng chọn => pending.
+Ngưỡng 75%: 69% pending, 75/85/88% confirmed.
+Bỏ các cổng phụ chặn tự xác nhận theo chất lượng/kích thước/crop mâu thuẫn.
+Ngưỡng không còn bị tự nâng theo độ nhạy phát hiện.
+Quy tắc này áp dụng cả ảnh tĩnh; confidence cao vẫn có thể nhận nhầm.
+Lọc nhận diện, kiểm tra crop, chống trùng và hỗ trợ nhiều khung video vẫn còn.
+Các chỉ số temporal_quality_pass/verification_score chỉ là thông tin kiểm chứng,
+không thay đổi quy tắc trạng thái theo ngưỡng.
+
+LƯU VẾT VÀ LỊCH SỬ
+JSON lưu initial_status, current_status, status_origin, triage_rule và ngưỡng.
+Giám sát viên sửa trạng thái sẽ có origin human và decision_history.
+Rê chuột lên huy hiệu trạng thái ở trang Duyệt để xem nguồn quyết định.
+Sự kiện cũ chưa có nhật ký sẽ hiện nguồn không xác định; không suy đoán đó là AI.
+Không tự phân loại lại dữ liệu lịch sử hoặc thay đổi quyết định duyệt cũ.
 
 KIỂM TRA
+python validation/test_clock.py
+python validation/test_status_policy.py
 python validation/test_rules.py
-Kiểm tra bằng dự đoán giả lập: tự xác nhận đủ điều kiện; thiếu điểm vẫn pending;
-ảnh tĩnh pending; mờ/thiếu sáng chặn tự xác nhận; có PPE hoặc mất một khung thì reset;
-chống ghi trùng và kiểm tra trạng thái thực tế qua hàm lưu sự kiện.
-validation/frame_comparison.json là kiểm tra 24 đầu vào của bản v2 trước đó,
-không phải kết quả đo precision/recall cho v3. temporal_v3.json là mẫu chuỗi của v3.
-Không có bộ nhãn chuẩn, không công bố tỷ lệ chính xác hay cam kết 100%.
-Chưa huấn luyện lại model. Lỗi bỏ sót ảnh người cúi và người không mũ ở xa còn tồn tại.
-Cần đánh giá trên dữ liệu công trường đã gán nhãn trước khi sử dụng quyết định tự động.
-
-Mẫu chuỗi v3: 24 khung/video, bước 5, đoạn frame 0..115, kiểm tra với analysis_fps mặc định 30. Đây là smoke test; app truyền FPS thật.
+Đã kiểm tra UTC+7/ngày qua nửa đêm; 12 ca phân luồng thật qua SQLite tạm;
+ranh giới 75%, ngưỡng cấu hình, nguồn quyết định thủ công và quy tắc nhận diện.
+Các báo cáo frame_comparison/temporal_v3/verification_v4 là lịch sử kiểm thử các bản trước,
+không phải đánh giá precision/recall hay kiểm thử end-to-end giao diện v6.
