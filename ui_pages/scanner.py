@@ -13,6 +13,7 @@ import base64
 import html as _html
 import math
 import tempfile
+import uuid
 from pathlib import Path
 
 import cv2
@@ -146,6 +147,7 @@ def _cached_first_frame_preview(
             active_violation_types=active_violations_tuple,
             tracker=preview_tracker,
             frame_idx=1,
+            single_frame_mode=True,
         )
         ok, jpg_buf = cv2.imencode(".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 86])
         b64_uri = (
@@ -321,8 +323,8 @@ def render_scanner_page(raw_events: list):
                     <div class="sg-threshold-note">
                         <b>Quy tắc phân luồng</b>
                         <p>
-                            ≥{effective_auto_confirm:.0%}: AI tự xác nhận<br/>
-                            {ai_sensitivity:.0%}–{max(ai_sensitivity, effective_auto_confirm - 0.01):.0%}: chờ giám sát duyệt
+                            ≥{effective_auto_confirm:.0%} + kiểm chứng nhiều khung: tự xác nhận<br/>
+                            Chưa đủ điều kiện kiểm chứng: chờ duyệt
                         </p>
                     </div>
                     """
@@ -446,7 +448,7 @@ def render_scanner_page(raw_events: list):
             with up_col_info:
                 if uploaded is not None:
                     up_name_safe = _html.escape(uploaded.name)
-                    up_kb = max(1, int(round(len(uploaded.getvalue()) / 1024)))
+                    up_kb = max(1, int(round(uploaded.size / 1024)))
                     ext_upper = Path(uploaded.name).suffix.lstrip(".").upper() or "FILE"
                     st.markdown(
                         clean_html(
@@ -530,6 +532,8 @@ def render_scanner_page(raw_events: list):
                 human_cnt = 0
 
                 for frame_idx, frame in read_frames(video_path_str, frame_step=speed_step, max_width=720):
+                    if not st.session_state.get("scan_is_running", False):
+                        break
                     frame = _normalize_scan_frame(frame)
                     annotated_bgr, new_viols, worker_cnt, env_info = smart_detect_and_annotate(
                         frame,
@@ -537,6 +541,7 @@ def render_scanner_page(raw_events: list):
                         active_violation_types=active_violations,
                         tracker=tracker,
                         frame_idx=frame_idx,
+                        analysis_fps=fps_val,
                     )
                     st.session_state.last_scan_telemetry = {
                         "worker_cnt": worker_cnt,
@@ -627,8 +632,16 @@ def render_scanner_page(raw_events: list):
                 if ext in (".mp4", ".avi", ".mov"):
                     tmp_dir = Path(tempfile.gettempdir()) / "safeguard_v6"
                     tmp_dir.mkdir(parents=True, exist_ok=True)
-                    tmp_path = tmp_dir / uploaded.name
-                    tmp_path.write_bytes(uploaded.getvalue())
+                    upload_key = (uploaded.file_id, uploaded.size)
+                    if st.session_state.get("_prepared_upload_key") != upload_key:
+                        tmp_path = tmp_dir / (uuid.uuid4().hex + ext)
+                        tmp_path.write_bytes(uploaded.getbuffer())
+                        previous = st.session_state.get("_prepared_upload_path")
+                        if previous:
+                            Path(previous).unlink(missing_ok=True)
+                        st.session_state._prepared_upload_key = upload_key
+                        st.session_state._prepared_upload_path = str(tmp_path)
+                    tmp_path = Path(st.session_state._prepared_upload_path)
                     run_video_scanner(
                         str(tmp_path),
                         f"Video tải lên ({uploaded.name})",
@@ -647,6 +660,7 @@ def render_scanner_page(raw_events: list):
                             active_violation_types=active_violations,
                             tracker=img_tracker,
                             frame_idx=1,
+                            single_frame_mode=True,
                         )
                         ok_enc, jpg_buf = cv2.imencode(".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
                         img_uri = (

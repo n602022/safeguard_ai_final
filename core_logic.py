@@ -484,6 +484,7 @@ class MultiPersonTrackerAndDeduplicator:
     """Bộ nhận diện nhiều người trong 1 khung hình & Khóa chống báo lặp (Anti-Duplicate Lock)."""
 
     def __init__(self, max_inactive_frames: int = 90, spatial_cooldown_frames: int = 120):
+        self.observations = {}
         self.next_id = 1
         self.max_inactive_frames = max_inactive_frames
         self.spatial_cooldown_frames = spatial_cooldown_frames
@@ -673,9 +674,11 @@ def smart_detect_and_annotate(
     active_violation_types=("NO-Hardhat", "NO-Safety Vest", "NO-Mask"),
     tracker: MultiPersonTrackerAndDeduplicator = None,
     frame_idx: int = 0,
+    single_frame_mode: bool = False,
+    analysis_fps: float = 30.0,
 ):
     """Nhận diện đa đối tượng thông minh trong khung hình + Tự động chống lóa/mờ + Chống báo lặp."""
-    results = _model.predict(source=frame_bgr, conf=conf_threshold, verbose=False)
+    results = _model.predict(source=frame_bgr, conf=min(conf_threshold, 0.25), verbose=False)
     raw_detections = []
     for result in results:
         if result.boxes is None:
@@ -700,14 +703,30 @@ def smart_detect_and_annotate(
     safe_masks = [d for d in raw_detections if d["label"] == "Mask"]
     person_dets = [
         d for d in raw_detections
-        if d["label"] == "Person" and (d["bbox"][2] - d["bbox"][0]) >= 22 and (d["bbox"][3] - d["bbox"][1]) >= 30
+        if d["label"] == "Person" and d["confidence"] >= 0.45 and (d["bbox"][2] - d["bbox"][0]) >= 22 and (d["bbox"][3] - d["bbox"][1]) >= 30
     ]
 
     if tracker is None:
         tracker = MultiPersonTrackerAndDeduplicator()
+    previous_processed_frame = getattr(tracker, "_last_processed_frame", None)
+    tracker._last_processed_frame = frame_idx
     tracked_workers = tracker.update_workers(person_dets, frame_idx, w, h)
 
     valid_safe_items = safe_hardhats + safe_vests + safe_masks
+    safe_owners = {}
+    for item in valid_safe_items:
+        choices = []
+        for wk in tracked_workers:
+            if box_inclusion_ratio(item["bbox"], wk["bbox"]) < 0.60:
+                continue
+            if not is_anatomically_valid(item["bbox"], wk["bbox"], item["label"]):
+                continue
+            cx = (item["bbox"][0] + item["bbox"][2]) / 2
+            distance = abs(cx - wk["center"][0]) / max(1, wk["bbox"][2] - wk["bbox"][0])
+            choices.append((distance, wk["worker_id"]))
+        if choices:
+            safe_owners[id(item)] = min(choices)[1]
+
     new_violations_to_log = []
     display_violations = []
     worker_having_violation = set()
@@ -741,7 +760,7 @@ def smart_detect_and_annotate(
             base_ov = max(inc, ov)
             if base_ov > max_raw_overlap:
                 max_raw_overlap = base_ov
-            if base_ov < 0.25:
+            if inc < 0.60:
                 continue
             if not is_anatomically_valid(d["bbox"], wk["bbox"], lbl):
                 continue
@@ -752,21 +771,17 @@ def smart_detect_and_annotate(
                 best_match_score = match_score
                 matched_worker = wk
 
-        if tracked_workers and matched_worker is None:
-            if max_raw_overlap >= 0.12 or conf < max(0.68, conf_threshold + 0.12):
-                continue
+        if matched_worker is None:
+            continue
 
-        if matched_worker is not None:
-            wid = matched_worker["worker_id"]
-            worker_bbox = matched_worker["bbox"]
-            worker_center = matched_worker["center"]
-        else:
-            wid = tracker.assign_virtual_worker(d["bbox"], frame_idx, w, h)
-            worker_bbox = d["bbox"]
-            worker_center = ((bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+        wid = matched_worker["worker_id"]
+        worker_bbox = matched_worker["bbox"]
+        worker_center = matched_worker["center"]
 
         if (wid, lbl) in worker_violation_pairs_in_frame:
             continue
+
+        worker_violation_pairs_in_frame.add((wid, lbl))
 
         local_env = evaluate_lighting_and_glare(
             frame_bgr,
@@ -775,29 +790,37 @@ def smart_detect_and_annotate(
             global_stats=global_stats,
         )
         required_conf = conf_threshold + local_env["conf_penalty"]
+        safe_label = {"NO-Hardhat": "Hardhat", "NO-Safety Vest": "Safety Vest", "NO-Mask": "Mask"}[lbl]
+        if any(item["label"] == safe_label and safe_owners.get(id(item)) == wid for item in valid_safe_items):
+            tracker.observations.pop((wid, lbl), None)
+            continue
 
         if lbl == "NO-Hardhat":
             has_hat_on_worker = any(
+                safe_owners.get(id(h_item)) == wid and (
                 box_overlap_ratio(d["bbox"], h_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(h_item["bbox"], worker_bbox) > 0.45
                     and is_anatomically_valid(h_item["bbox"], worker_bbox, "Hardhat")
                 )
+                )
                 for h_item in safe_hardhats
             )
-            if has_hat_on_worker or conf < max(0.52, required_conf):
+            if has_hat_on_worker or conf < max(0.55, required_conf):
                 continue
 
         elif lbl == "NO-Safety Vest":
             has_vest_on_worker = any(
+                safe_owners.get(id(v_item)) == wid and (
                 box_overlap_ratio(d["bbox"], v_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(v_item["bbox"], worker_bbox) > 0.40
                     and is_anatomically_valid(v_item["bbox"], worker_bbox, "Safety Vest")
                 )
+                )
                 for v_item in safe_vests
             )
-            min_vest_conf = max(0.62, required_conf)
+            min_vest_conf = max(0.75, required_conf)
             if local_env["is_glare"]:
                 min_vest_conf = max(min_vest_conf, 0.80)
             if has_vest_on_worker or conf < min_vest_conf:
@@ -805,16 +828,52 @@ def smart_detect_and_annotate(
 
         elif lbl == "NO-Mask":
             has_mask_on_worker = any(
+                safe_owners.get(id(m_item)) == wid and (
                 box_overlap_ratio(d["bbox"], m_item["bbox"]) > 0.15
                 or (
                     box_inclusion_ratio(m_item["bbox"], worker_bbox) > 0.45
                     and is_anatomically_valid(m_item["bbox"], worker_bbox, "Mask")
+                )
                 )
                 for m_item in safe_masks
             )
             if has_mask_on_worker or conf < max(0.75, required_conf):
                 continue
 
+        # A partial/occluded person is insufficient evidence for a violation.
+        px1, py1, px2, py2 = worker_bbox
+        if py2 - py1 < 100 or px2 - px1 < 35:
+            continue
+        if lbl == "NO-Safety Vest" and bh < (py2 - py1) * 0.18:
+            continue
+        key = (wid, lbl)
+        previous = tracker.observations.get(key, {})
+        continuous = previous.get("frame") == previous_processed_frame and previous_processed_frame is not None and 0 < frame_idx - previous_processed_frame <= 30
+        quality_ok = (
+            not local_env["is_glare"] and not local_env["is_blur"]
+            and local_env["conf_penalty"] == 0
+            and matched_worker["confidence"] >= 0.65
+            and px1 > 4 and py1 > 4 and px2 < w - 4 and py2 < h - 4
+            and py2 - py1 >= 140 and px2 - px1 >= 45
+        )
+        observation = {
+            "count": previous["count"] + 1 if continuous else 1,
+            "first_frame": previous["first_frame"] if continuous else frame_idx,
+            "frame": frame_idx,
+            "minimum_confidence": min(previous["minimum_confidence"], conf) if continuous else conf,
+            "quality_ok": previous["quality_ok"] and quality_ok if continuous else quality_ok,
+        }
+        tracker.observations[key] = observation
+        count = observation["count"]
+        span_seconds = (frame_idx - observation["first_frame"]) / max(1.0, float(analysis_fps))
+        if not single_frame_mode and (count < 8 or span_seconds < 0.6):
+            continue
+        verification_score = observation["minimum_confidence"]
+        auto_eligible = (
+            not single_frame_mode and count >= 8 and span_seconds >= 0.6
+            and observation["quality_ok"]
+            and verification_score >= (0.90 if lbl == "NO-Mask" else 0.85)
+        )
         worker_having_violation.add(wid)
         worker_violation_pairs_in_frame.add((wid, lbl))
 
@@ -826,6 +885,11 @@ def smart_detect_and_annotate(
             "worker_id": wid,
             "already_logged": already_logged,
             "env_status": local_env["status_text"],
+            "auto_confirm_eligible": auto_eligible,
+            "verification_score": verification_score,
+            "support_frames": count,
+            "support_seconds": round(span_seconds, 3),
+            "verification_reason": "temporal_quality_pass" if auto_eligible else "human_review_required",
         }
         display_violations.append(det_record)
 
@@ -899,7 +963,7 @@ def save_new_violations_to_db(
         conf = v["confidence"]
         wid = v.get("worker_id", 1)
 
-        initial_status = "confirmed" if conf >= auto_confirm_threshold else "pending"
+        initial_status = "confirmed" if min(conf, v.get("verification_score", 0.0)) >= auto_confirm_threshold and v.get("auto_confirm_eligible", False) else "pending"
         new_id = insert_event(timestamp=now_str, violation_type=v_type, status=initial_status)
 
         img_path = EVIDENCE_DIR / f"event_{new_id}.jpg"
@@ -916,6 +980,12 @@ def save_new_violations_to_db(
             "violation_type": v_type,
             "env_status": v.get("env_status", "Ổn định"),
             "auto_triaged": initial_status == "confirmed",
+            "verification_score": v.get("verification_score", 0.0),
+            "support_frames": v.get("support_frames", 1),
+            "support_seconds": v.get("support_seconds", 0.0),
+            "verification_reason": v.get("verification_reason", "human_review_required"),
+            "auto_confirm_threshold": auto_confirm_threshold,
+            "verification_policy": "temporal_v3",
         }
         meta_path.write_text(json.dumps(meta_data, ensure_ascii=False), encoding="utf-8")
 

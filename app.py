@@ -76,7 +76,7 @@ def _warm_up_once() -> bool:
         except Exception:
             pass
 
-    threading.Thread(target=_job, daemon=True).start()
+    # Avoid concurrent mutation of process-wide event caches during rendering.
     return True
 
 

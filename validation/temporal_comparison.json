@@ -1,0 +1,27 @@
+[
+  {
+    "video": "sample_1_hd.mp4",
+    "events": []
+  },
+  {
+    "video": "sample_2_hd.mp4",
+    "events": []
+  },
+  {
+    "video": "sample_3_vertical.mp4",
+    "events": []
+  },
+  {
+    "video": "sample_4_no_hardhat_mask.mp4",
+    "events": [
+      {
+        "frame": 15,
+        "label": "NO-Hardhat"
+      }
+    ]
+  },
+  {
+    "video": "sample_5_heavy.mp4",
+    "events": []
+  }
+]

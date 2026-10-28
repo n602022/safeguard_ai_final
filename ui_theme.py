@@ -2159,4 +2159,4 @@ def apply_ui_theme():
     if mode not in ("light", "dark", "system"):
         mode = "light"
     collapsed = bool(st.session_state.get("sidebar_collapsed", False))
-    st.markdown(_STYLE_TAG_CACHE[(mode, collapsed)], unsafe_allow_html=True)
+    st.markdown(_STYLE_TAG_CACHE[(mode, collapsed)] + "<style>[data-stale=true]{opacity:1 !important;} [data-testid=stHorizontalBlock] > [data-testid=stColumn]{min-width:0;}</style>", unsafe_allow_html=True)

@@ -9,3 +9,7 @@ textColor = "#172033"
 
 [client]
 toolbarMode = "viewer"
+
+[server]
+maxUploadSize = 200
+enableWebsocketCompression = true
