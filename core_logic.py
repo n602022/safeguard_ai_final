@@ -969,32 +969,36 @@ def smart_detect_and_annotate(
         # Verify uncertain negatives on the associated worker, not another
         # worker in the same frame. Explicit positive crop evidence can reject
         # a false alarm; absence of a positive is never proof of a violation.
-        if conf < 0.75:
-            cache = getattr(tracker, "_negative_check_cache", {})
-            cache = {k:v for k,v in cache.items() if 0 <= frame_idx-v["frame"] < 15}
-            entry = cache.get(wid)
-            if entry is None or iou_score(entry["bbox"], worker_bbox) < .7:
-                x1,y1,x2,y2 = max(0,worker_bbox[0]),max(0,worker_bbox[1]),min(w,worker_bbox[2]),min(h,worker_bbox[3])
-                items=[]
-                for result in _model.predict(source=frame_bgr[y1:y2,x1:x2], conf=.25, verbose=False):
-                    if result.boxes is None: continue
-                    for box in result.boxes:
-                        b=box.xyxy[0].tolist()
-                        items.append((result.names[int(box.cls.item())],float(box.conf.item()),
-                                      [b[0]/(x2-x1),b[1]/(y2-y1),b[2]/(x2-x1),b[3]/(y2-y1)]))
-                entry={"frame":frame_idx,"bbox":worker_bbox,"items":items}
-                cache[wid]=entry
-            tracker._negative_check_cache=cache
-            positives=[];negatives=[]
-            for name,score,rb in entry["items"]:
-                x1,y1,x2,y2=worker_bbox
-                mapped=[x1+rb[0]*(x2-x1),y1+rb[1]*(y2-y1),x1+rb[2]*(x2-x1),y1+rb[3]*(y2-y1)]
-                if iou_score(mapped,d["bbox"]) < .1: continue
-                if name==safe_label: positives.append(score)
-                if name==lbl: negatives.append(score)
-            if max(positives,default=0) >= .5 and max(positives) >= max(negatives,default=0):
+        review_reason = None
+        cache = getattr(tracker, "_negative_check_cache", {})
+        cache = {k:v for k,v in cache.items() if 0 <= frame_idx-v["frame"] < 15}
+        entry = cache.get(wid)
+        if entry is None or iou_score(entry["bbox"], worker_bbox) < .7:
+            x1,y1,x2,y2 = max(0,worker_bbox[0]),max(0,worker_bbox[1]),min(w,worker_bbox[2]),min(h,worker_bbox[3])
+            items=[]
+            for result in _model.predict(source=frame_bgr[y1:y2,x1:x2], conf=.25, verbose=False):
+                if result.boxes is None: continue
+                for box in result.boxes:
+                    b=box.xyxy[0].tolist()
+                    items.append((result.names[int(box.cls.item())],float(box.conf.item()),
+                                  [b[0]/(x2-x1),b[1]/(y2-y1),b[2]/(x2-x1),b[3]/(y2-y1)]))
+            entry={"frame":frame_idx,"bbox":worker_bbox,"items":items}
+            cache[wid]=entry
+        tracker._negative_check_cache=cache
+        positives=[];negatives=[]
+        for name,score,rb in entry["items"]:
+            x1,y1,x2,y2=worker_bbox
+            mapped=[x1+rb[0]*(x2-x1),y1+rb[1]*(y2-y1),x1+rb[2]*(x2-x1),y1+rb[3]*(y2-y1)]
+            if iou_score(mapped,d["bbox"]) < .1: continue
+            if name==safe_label: positives.append(score)
+            if name==lbl: negatives.append(score)
+        if max(positives,default=0) >= .5:
+            if max(positives) >= max(negatives,default=0) and conf < auto_confirm_threshold:
                 tracker.observations.pop((wid,lbl),None)
                 continue
+            review_reason = "conflicting_ppe_evidence"
+        elif lbl == "NO-Safety Vest" and conf >= auto_confirm_threshold and max(negatives,default=0) < .5:
+            review_reason = "negative_not_verified_on_worker_crop"
         if any(item["label"] == safe_label and safe_owners.get(id(item)) == wid and item["confidence"] >= conf for item in valid_safe_items):
             tracker.observations.pop((wid, lbl), None)
             continue
@@ -1065,6 +1069,11 @@ def smart_detect_and_annotate(
             "minimum_confidence": min(previous["minimum_confidence"], conf) if continuous else conf,
             "quality_ok": previous["quality_ok"] and quality_ok if continuous else quality_ok,
         }
+        observation["recent_scores"] = ((previous.get("recent_scores", []) if continuous else []) + [conf])[-8:]
+        if (lbl == "NO-Safety Vest" and conf >= auto_confirm_threshold
+                and (len(observation["recent_scores"]) < 8 or min(observation["recent_scores"]) < auto_confirm_threshold)
+                and not single_frame_mode):
+            review_reason = review_reason or "vest_confidence_not_stable"
         tracker.observations[key] = observation
         count = observation["count"]
         span_seconds = (frame_idx - observation["first_frame"]) / max(1.0, float(analysis_fps))
@@ -1086,8 +1095,9 @@ def smart_detect_and_annotate(
         event_ref = tracker._event_refs.setdefault((wid, lbl), {})
         upgrade_pending = (already_logged and event_ref.get("status") == "pending"
                            and event_ref.get("event_id") is not None
-                           and conf >= auto_confirm_threshold)
+                           and conf >= auto_confirm_threshold and not review_reason)
         det_record = {
+            "review_reason": review_reason,
             "event_ref": event_ref,
             "upgrade_event_id": event_ref.get("event_id") if upgrade_pending else None,
             "label": lbl,
@@ -1108,6 +1118,23 @@ def smart_detect_and_annotate(
         if not already_logged or upgrade_pending:
             tracker.mark_logged(wid, lbl, worker_center, frame_idx=frame_idx)
             new_violations_to_log.append(det_record)
+
+    # An uncertain positive helmet detection is an inspection task, not a
+    # fabricated NO-Hardhat probability. Persist it for human review.
+    if "NO-Hardhat" in active_violation_types:
+        for item in uncertain_hats:
+            owners = [wk for wk in tracked_workers if box_inclusion_ratio(item["bbox"],wk["bbox"]) >= .6]
+            if not owners: continue
+            owner=min(owners,key=lambda wk:abs((item["bbox"][0]+item["bbox"][2])/2-wk["center"][0]))
+            wid=owner["worker_id"]
+            if tracker.is_already_logged(wid,"NO-Hardhat",owner["center"],w,h,frame_idx): continue
+            if not hasattr(tracker,"_event_refs"): tracker._event_refs={}
+            ref=tracker._event_refs.setdefault((wid,"NO-Hardhat"),{})
+            new_violations_to_log.append({"label":"NO-Hardhat","confidence":item["confidence"],
+                "worker_id":wid,"bbox":item["bbox"],"event_ref":ref,
+                "review_reason":"helmet_detection_unverified","confidence_kind":"positive_helmet_score",
+                "env_status":frame_env["status_text"]})
+            tracker.mark_logged(wid,"NO-Hardhat",owner["center"],frame_idx)
 
     annotated = frame_bgr.copy()
     label_vn_map = {
@@ -1136,8 +1163,8 @@ def smart_detect_and_annotate(
 
     for item in uncertain_hats:
         x1,y1,x2,y2=item["bbox"]
-        cv2.rectangle(annotated,(x1,y1),(x2,y2),(0,180,255),2)
-        _draw_smart_label(annotated,"MU: CAN KIEM TRA",x1,y1,(0,180,255),font_scale=.46)
+        cv2.rectangle(annotated,(x1,y1),(x2,y2),(0,0,255),2)
+        _draw_smart_label(annotated,"NGHI NGO: Khong mu [Cho duyet]",x1,y1,(0,0,255),font_scale=.46)
 
     viol_vn_map = {
         "NO-Hardhat": "VI PHAM: Khong mu",
@@ -1154,6 +1181,9 @@ def smart_detect_and_annotate(
         v_color = (0, 0, 255)
         lock_note = " [Da ghi nhan]" if v_item["already_logged"] else ""
         label_text = viol_vn_map.get(v_item["label"], v_item["label"])
+        if v_item.get("review_reason"):
+            label_text = label_text.replace("VI PHAM:", "NGHI NGO:")
+            lock_note += " [Cho duyet]"
         v_text = f"{label_text} ({v_item['confidence']:.0%}){lock_note}"
         cv2.rectangle(annotated, (x1, y1), (x2, y2), v_color, 3)
         _draw_smart_label(annotated, v_text, x1, y1 + (stack_idx * 22), v_color, font_scale=0.50, thickness=2)
@@ -1182,7 +1212,7 @@ def save_new_violations_to_db(
         conf = v["confidence"]
         wid = v.get("worker_id", 1)
 
-        initial_status = classify_event_status(conf, auto_confirm_threshold)
+        initial_status = ("pending" if v.get("review_reason") else classify_event_status(conf, auto_confirm_threshold))
         upgrade_id = v.get("upgrade_event_id")
         previous_meta = None
         if upgrade_id is not None:
@@ -1227,21 +1257,23 @@ def save_new_violations_to_db(
             "frame_idx": frame_idx,
             "video_sec": round(sec_in_video, 1),
             "confidence": float(conf),
+            "confidence_kind": v.get("confidence_kind", "violation_score"),
+            "review_reason": v.get("review_reason"),
             "violation_type": v_type,
             "env_status": v.get("env_status", "Ổn định"),
             "auto_triaged": initial_status == "confirmed",
             "initial_status": initial_status,
             "current_status": initial_status,
             "status_origin": "ai_auto" if initial_status == "confirmed" else "ai_pending",
-            "triage_rule": "confidence_gte_selected_threshold_v6",
+            "triage_rule": "verified_confidence_or_review_reason_v9",
             "verification_score": v.get("verification_score", 0.0),
             "support_frames": v.get("support_frames", 1),
             "support_seconds": v.get("support_seconds", 0.0),
-            "verification_reason": "threshold_pass" if initial_status == "confirmed" else "below_selected_threshold",
+            "verification_reason": "threshold_pass" if initial_status == "confirmed" else (v.get("review_reason") or "below_selected_threshold"),
             "temporal_verification_reason": v.get("verification_reason", "not_recorded"),
             "temporal_quality_pass": v.get("temporal_quality_pass", False),
             "auto_confirm_threshold": auto_confirm_threshold,
-            "verification_policy": "confidence_threshold_v6",
+            "verification_policy": "ppe_crop_verification_v9",
             "crop_disagreement": v.get("crop_disagreement", False),
         }
         if previous_meta is not None:
@@ -1551,6 +1583,8 @@ def _build_enriched_events_internal(raw_events: list) -> list:
         except (TypeError, ValueError):
             conf_val = None
 
+        if meta.get("confidence_kind") == "positive_helmet_score":
+            conf_val = None
         cam_full = str(meta.get("camera", "Chưa ghi nhận vị trí camera"))
         sys_cam = normalize_system_camera_name(cam_full)
         cam_short = "Khác"
@@ -1564,7 +1598,7 @@ def _build_enriched_events_internal(raw_events: list) -> list:
             "timestamp": normalize_timestamp(e.get("timestamp", "")),
             "timestamp_vn": fmt_ts_vn(e.get("timestamp", "")),
             "violation_type": vtype,
-            "title_tv": TEN_LOI_TV.get(vtype, vtype),
+            "title_tv": ("Nghi ngờ không đội mũ bảo hộ" if meta.get("review_reason")=="helmet_detection_unverified" else TEN_LOI_TV.get(vtype, vtype)),
             "status": status,
             "status_tv": TRANG_THAI_TV.get(status, status),
             "status_badge_tv": TRANG_THAI_BADGE_TV.get(status, status),
@@ -1576,7 +1610,7 @@ def _build_enriched_events_internal(raw_events: list) -> list:
             "camera_code": cam_short,
             "video_sec": meta.get("video_sec"),
             "confidence": conf_val,
-            "confidence_pct": f"{int(round(conf_val * 100))}%" if conf_val is not None else "N/A",
+            "confidence_pct": ("Cần duyệt mũ" if meta.get("confidence_kind")=="positive_helmet_score" else (f"{int(round(conf_val * 100))}%" if conf_val is not None else "N/A")),
             "env_status": str(meta.get("env_status", "Chưa có thông tin")),
             "iot_action": str(meta.get("iot_action", "Chưa kích hoạt")),
             "auto_triaged": bool(meta.get("auto_triaged", False)),
