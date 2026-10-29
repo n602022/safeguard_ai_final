@@ -123,7 +123,8 @@ def main():
 
     # 6. Điều phối hiển thị trang chức năng đang chọn
     _t2 = time.perf_counter()
-    with st.container(key=f"page_content_{active_page}"):
+    # Reuse one React/Streamlit container; do not retain old/new keyed pages together.
+    with st.container(key="page_content"):
         if active_page == "dashboard":
             render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
         elif active_page == "scan":

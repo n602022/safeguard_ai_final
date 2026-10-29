@@ -1,55 +1,73 @@
 (() => {
   let win, doc;
-  try {win=window.parent;doc=win.document;} catch (_) {return;}
-  if(win.__sgTransitionVersion === 11) return;
-  if(win.__sgTransitionDispose) win.__sgTransitionDispose();
+  try { win = window.parent; doc = win.document; } catch (_) { return; }
+  if (win.__sgTransitionVersion === 12) return;
+  if (typeof win.__sgTransitionDispose === 'function') win.__sgTransitionDispose();
   doc.getElementById('sg-transition-snapshot')?.remove();
-  win.__sgTransitionVersion=11;
+  win.__sgTransitionVersion = 12;
   const controller = new win.AbortController();
-  const tokens=()=>Array.from(doc.querySelectorAll('[data-sg-render-token]')).map(el=>el.dataset.sgRenderToken).join('|');
-  let beforeTokens='';
-  let overlay=null,quiet=null,watchdog=null,started=0;
-  const running=()=>!!doc.querySelector('.stApp[data-teststate="running"]');
-  const release=()=>{if(overlay){overlay.remove();overlay=null;}win.clearTimeout(quiet);win.clearTimeout(watchdog);};
-  const settle=()=>{
-    if(!overlay)return;
-    win.clearTimeout(quiet);
-    quiet=win.setTimeout(()=>{
-      if(tokens()!==beforeTokens && !running() && Date.now()-started>180)release();
-      else if(overlay)settle();
-    },120);
+  let active = null;
+  const style = doc.createElement('style');
+  style.textContent = `
+    html.sg-transition-active::view-transition-group(root),
+    html.sg-transition-active::view-transition-old(root),
+    html.sg-transition-active::view-transition-new(root) {
+      animation: none !important;
+    }
+  `;
+  doc.head.appendChild(style);
+  const tokens = () => Array.from(doc.querySelectorAll('[data-sg-render-token]'))
+    .map(el => el.dataset.sgRenderToken).join('|');
+  const finish = (state, skip = false) => {
+    if (!state || active !== state) return;
+    active = null;
+    win.clearInterval(state.poll);
+    win.clearTimeout(state.timeout);
+    state.resolve();
+    if (skip) state.transition?.skipTransition();
+    // Keep transition CSS until the browser releases its native snapshot.
+    Promise.resolve(state.transition?.finished).catch(() => {}).finally(() => {
+      if (!active) doc.documentElement.classList.remove('sg-transition-active');
+    });
   };
-  const freeze=()=>{
-    if(overlay)return;
-    beforeTokens=tokens();
-    const app=doc.querySelector('.stApp');if(!app)return;
-    const clone=app.cloneNode(true);
-    const originals=[app,...app.querySelectorAll('*')];
-    const copies=[clone,...clone.querySelectorAll('*')];
-    overlay=doc.createElement('div');overlay.id='sg-transition-snapshot';
-    overlay.setAttribute('aria-hidden','true');
-    overlay.style.cssText='position:fixed;inset:0;z-index:999990;overflow:hidden;pointer-events:auto;';
-    const shadow=overlay.attachShadow({mode:'open'});
-    doc.querySelectorAll('style,link[rel="stylesheet"]').forEach(el=>shadow.appendChild(el.cloneNode(true)));
-    const vars=win.getComputedStyle(app);
-    for(let i=0;i<vars.length;i++){const key=vars[i];if(key.startsWith('--'))overlay.style.setProperty(key,vars.getPropertyValue(key));}
-    clone.style.margin='0';shadow.appendChild(clone);doc.body.appendChild(overlay);
-    originals.forEach((el,i)=>{if(copies[i]){copies[i].scrollTop=el.scrollTop;copies[i].scrollLeft=el.scrollLeft;}});
-    started=Date.now();watchdog=win.setTimeout(release,10000);settle();
+  const begin = () => {
+    // Unsupported browsers retain normal Streamlit rendering, with no overlay.
+    if (active || doc.hidden || typeof doc.startViewTransition !== 'function') return;
+    const before = tokens();
+    if (!before || doc.querySelector('.stApp[data-teststate="running"]')) return;
+    let resolve;
+    const done = new Promise(r => { resolve = r; });
+    const state = { resolve, transition: null, poll: null, timeout: null };
+    active = state;
+    doc.documentElement.classList.add('sg-transition-active');
+    try {
+      state.transition = doc.startViewTransition(() => done);
+      state.transition.ready.catch(() => finish(state, true));
+      state.transition.finished.catch(() => {}).finally(() => finish(state));
+      state.poll = win.setInterval(() => {
+        if (tokens() !== before && !doc.querySelector('.stApp[data-teststate="running"]')) {
+          finish(state);
+        }
+      }, 40);
+      // Never hold an old screen for the previous 10-second watchdog.
+      state.timeout = win.setTimeout(() => finish(state, true), 1500);
+    } catch (_) { finish(state, true); }
   };
-  doc.addEventListener('click',event=>{
-    const button=event.target.closest('button');if(!button)return;
-    // Live scan must stream its frames. Native pickers/downloads need no mask.
-    if(/Bắt đầu quét|Dừng quét|Browse|Tải bằng chứng|Xuất báo cáo|Tải xuống/i.test(button.textContent||''))return;
-    if(button.closest('[data-testid="stFileUploader"],#sg-transition-snapshot'))return;
-    freeze();
-  },{capture:true,signal:controller.signal});
-  doc.addEventListener('change',event=>{
-    if(event.target.matches('input[type="file"]'))return;
-    if(event.target.closest('.stApp'))freeze();
-  },{capture:true,signal:controller.signal});
-  const observer=new win.MutationObserver(settle);
-  observer.observe(doc.querySelector('#root')||doc.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-teststate']});
-  doc.addEventListener('visibilitychange',()=>{if(doc.hidden)release();},{signal:controller.signal});
-  win.__sgTransitionDispose=()=>{release();controller.abort();observer.disconnect();};
+  doc.addEventListener('click', event => {
+    const button = event.target.closest?.('button');
+    if (!button || button.disabled || !button.closest('.stApp')) return;
+    if (button.closest('[data-testid="stFileUploader"],[data-testid="stDownloadButton"]')) return;
+    if (/Bắt đầu quét|Dừng quét|Browse|Tải bằng chứng|Xuất báo cáo|Tải xuống/i.test(button.textContent || '')) return;
+    begin();
+  }, { capture: true, signal: controller.signal });
+  // Do not freeze every input/change event: sliders, uploads and scan streams
+  // must remain interactive and do not necessarily produce a page-end marker.
+  doc.addEventListener('visibilitychange', () => {
+    if (doc.hidden) finish(active, true);
+  }, { signal: controller.signal });
+  win.__sgTransitionDispose = () => {
+    finish(active, true);
+    controller.abort();
+    style.remove();
+  };
 })();

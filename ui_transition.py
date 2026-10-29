@@ -1,4 +1,4 @@
-"""Keep the current DOM visible while Streamlit processes an interaction."""
+"""Bounded browser-native transitions; never clone Streamlit's DOM or iframes."""
 from pathlib import Path
 import uuid
 import streamlit as st
