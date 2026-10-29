@@ -1,0 +1,22 @@
+[
+  {
+    "video": "sample_4_no_hardhat_mask.mp4",
+    "frame": 0,
+    "version": "original",
+    "label": "NO-Hardhat",
+    "confidence": 0.7715,
+    "reason": null,
+    "full_score": null,
+    "crop_score": null
+  },
+  {
+    "video": "sample_4_no_hardhat_mask.mp4",
+    "frame": 35,
+    "version": "updated",
+    "label": "NO-Hardhat",
+    "confidence": 0.852,
+    "reason": null,
+    "full_score": 0.852,
+    "crop_score": 0.5855013728141785
+  }
+]

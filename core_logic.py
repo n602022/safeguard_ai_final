@@ -798,35 +798,7 @@ def smart_detect_and_annotate(
         tracker._vest_crop_cache = []
     raw_detections = refine_distant_detections(frame_bgr, raw_detections, tracker, frame_idx)
     persons_for_crop = [d for d in raw_detections if d["label"] == "Person" and d["confidence"] >= 0.5]
-    # Oversized helmet boxes can cover arms/shoulders in low-angle views.
-    # Require crop-scale agreement before presenting those as a detected helmet.
-    uncertain_hats = []
-    checked_hats = []
-    for hat in [d for d in raw_detections if d["label"] == "Hardhat"]:
-        owners = [p for p in persons_for_crop if box_inclusion_ratio(hat["bbox"],p["bbox"]) >= .6]
-        if not owners: continue
-        owner = min(owners, key=lambda p:(p["bbox"][2]-p["bbox"][0])*(p["bbox"][3]-p["bbox"][1]))
-        pb=owner["bbox"];hb=hat["bbox"];pw=pb[2]-pb[0];ph=pb[3]-pb[1]
-        if pw < 150 or (hb[3]-hb[1]) < .28*ph or (hb[2]-hb[0])*(hb[3]-hb[1]) < .05*pw*ph:
-            continue
-        if len(checked_hats)>=2: break
-        x1,y1,x2,y2=max(0,pb[0]),max(0,pb[1]),min(w,pb[2]),min(h,pb[3])
-        entry=next((c for c in getattr(tracker,"_hat_check_cache",[]) if 0<=frame_idx-c["frame"]<15 and iou_score(pb,c["bbox"])>=.7),None)
-        if entry is None:
-            supported=False
-            for result in _model.predict(source=frame_bgr[y1:y2,x1:x2],conf=.25,verbose=False):
-                if result.boxes is None: continue
-                for box in result.boxes:
-                    if result.names[int(box.cls.item())]!="Hardhat" or float(box.conf.item())<.5: continue
-                    b=box.xyxy[0].tolist();mapped=[b[0]+x1,b[1]+y1,b[2]+x1,b[3]+y1]
-                    if iou_score(mapped,hb)>=.2: supported=True
-            entry={"frame":frame_idx,"bbox":pb,"supported":supported}
-        checked_hats.append(entry)
-        if not entry["supported"]: uncertain_hats.append(hat)
-    tracker._hat_check_cache=checked_hats
-    uncertain_ids={id(d) for d in uncertain_hats}
-    raw_detections=[d for d in raw_detections if id(d) not in uncertain_ids]
-    claimed_vests = [d for d in raw_detections if d["label"] == "Safety Vest"]
+    claimed_vests = [d for d in raw_detections if d["label"] == "Safety Vest" and d["confidence"] >= conf_threshold]
     removed_vests = set()
     crop_negatives = []
     used_cache = []
@@ -862,9 +834,9 @@ def smart_detect_and_annotate(
     tracker._vest_crop_cache = used_cache
     raw_detections = [d for d in raw_detections if id(d) not in removed_vests] + crop_negatives
 
-    safe_hardhats = [d for d in raw_detections if d["label"] == "Hardhat"]
-    safe_vests = [d for d in raw_detections if d["label"] == "Safety Vest"]
-    safe_masks = [d for d in raw_detections if d["label"] == "Mask"]
+    safe_hardhats = [d for d in raw_detections if d["label"] == "Hardhat" and d["confidence"] >= conf_threshold]
+    safe_vests = [d for d in raw_detections if d["label"] == "Safety Vest" and d["confidence"] >= conf_threshold]
+    safe_masks = [d for d in raw_detections if d["label"] == "Mask" and d["confidence"] >= conf_threshold]
     person_dets = [
         d for d in raw_detections
         if d["label"] == "Person" and d["confidence"] >= 0.45 and (d["bbox"][2] - d["bbox"][0]) >= 10 and (d["bbox"][3] - d["bbox"][1]) >= 28
@@ -992,6 +964,14 @@ def smart_detect_and_annotate(
             if iou_score(mapped,d["bbox"]) < .1: continue
             if name==safe_label: positives.append(score)
             if name==lbl: negatives.append(score)
+        full_frame_confidence = conf
+        crop_confidence = max(negatives, default=0.0)
+        # Use the lower of two localized predictions of the SAME violation.
+        # This is a conservative evidence score, not a calibrated probability.
+        # Missing crop evidence remains an explicit review reason, never a
+        # fabricated NO-* score or a fixed number below the review threshold.
+        if lbl == "NO-Safety Vest" and crop_confidence >= conf_threshold:
+            conf = min(conf, crop_confidence)
         if max(positives,default=0) >= .5:
             if max(positives) >= max(negatives,default=0) and conf < auto_confirm_threshold:
                 tracker.observations.pop((wid,lbl),None)
@@ -1097,6 +1077,9 @@ def smart_detect_and_annotate(
                            and event_ref.get("event_id") is not None
                            and conf >= auto_confirm_threshold and not review_reason)
         det_record = {
+            "full_frame_confidence": full_frame_confidence,
+            "crop_confidence": crop_confidence,
+            "confidence_aggregation": "minimum_of_localized_views" if lbl == "NO-Safety Vest" and crop_confidence >= conf_threshold else "full_frame_only",
             "review_reason": review_reason,
             "event_ref": event_ref,
             "upgrade_event_id": event_ref.get("event_id") if upgrade_pending else None,
@@ -1119,28 +1102,11 @@ def smart_detect_and_annotate(
             tracker.mark_logged(wid, lbl, worker_center, frame_idx=frame_idx)
             new_violations_to_log.append(det_record)
 
-    # An uncertain positive helmet detection is an inspection task, not a
-    # fabricated NO-Hardhat probability. Persist it for human review.
-    if "NO-Hardhat" in active_violation_types:
-        for item in uncertain_hats:
-            owners = [wk for wk in tracked_workers if box_inclusion_ratio(item["bbox"],wk["bbox"]) >= .6]
-            if not owners: continue
-            owner=min(owners,key=lambda wk:abs((item["bbox"][0]+item["bbox"][2])/2-wk["center"][0]))
-            wid=owner["worker_id"]
-            if tracker.is_already_logged(wid,"NO-Hardhat",owner["center"],w,h,frame_idx): continue
-            if not hasattr(tracker,"_event_refs"): tracker._event_refs={}
-            ref=tracker._event_refs.setdefault((wid,"NO-Hardhat"),{})
-            new_violations_to_log.append({"label":"NO-Hardhat","confidence":item["confidence"],
-                "worker_id":wid,"bbox":item["bbox"],"event_ref":ref,
-                "review_reason":"helmet_detection_unverified","confidence_kind":"positive_helmet_score",
-                "env_status":frame_env["status_text"]})
-            tracker.mark_logged(wid,"NO-Hardhat",owner["center"],frame_idx)
-
     annotated = frame_bgr.copy()
     label_vn_map = {
-        "Hardhat": "AI: Mu bao ho",
-        "Safety Vest": "AI: Ao phan quang",
-        "Mask": "AI: Khau trang",
+        "Hardhat": "An toan: Mu bao ho",
+        "Safety Vest": "An toan: Ao phan quang",
+        "Mask": "An toan: Khau trang",
     }
 
     for wk in tracked_workers:
@@ -1161,11 +1127,6 @@ def smart_detect_and_annotate(
         cv2.rectangle(annotated, (x1, y1), (x2, y2), s_color, 2)
         _draw_smart_label(annotated, s_text, x1, y1, s_color, font_scale=0.46, thickness=1)
 
-    for item in uncertain_hats:
-        x1,y1,x2,y2=item["bbox"]
-        cv2.rectangle(annotated,(x1,y1),(x2,y2),(0,0,255),2)
-        _draw_smart_label(annotated,"NGHI NGO: Khong mu [Cho duyet]",x1,y1,(0,0,255),font_scale=.46)
-
     viol_vn_map = {
         "NO-Hardhat": "VI PHAM: Khong mu",
         "NO-Safety Vest": "VI PHAM: Khong ao",
@@ -1180,11 +1141,7 @@ def smart_detect_and_annotate(
 
         v_color = (0, 0, 255)
         lock_note = " [Da ghi nhan]" if v_item["already_logged"] else ""
-        label_text = viol_vn_map.get(v_item["label"], v_item["label"])
-        if v_item.get("review_reason"):
-            label_text = label_text.replace("VI PHAM:", "NGHI NGO:")
-            lock_note += " [Cho duyet]"
-        v_text = f"{label_text} ({v_item['confidence']:.0%}){lock_note}"
+        v_text = f"{viol_vn_map.get(v_item['label'], v_item['label'])} ({v_item['confidence']:.0%}){lock_note}"
         cv2.rectangle(annotated, (x1, y1), (x2, y2), v_color, 3)
         _draw_smart_label(annotated, v_text, x1, y1 + (stack_idx * 22), v_color, font_scale=0.50, thickness=2)
 
@@ -1258,6 +1215,9 @@ def save_new_violations_to_db(
             "video_sec": round(sec_in_video, 1),
             "confidence": float(conf),
             "confidence_kind": v.get("confidence_kind", "violation_score"),
+            "full_frame_confidence": v.get("full_frame_confidence", float(conf)),
+            "crop_confidence": v.get("crop_confidence"),
+            "confidence_aggregation": v.get("confidence_aggregation", "full_frame_only"),
             "review_reason": v.get("review_reason"),
             "violation_type": v_type,
             "env_status": v.get("env_status", "Ổn định"),
@@ -1598,7 +1558,7 @@ def _build_enriched_events_internal(raw_events: list) -> list:
             "timestamp": normalize_timestamp(e.get("timestamp", "")),
             "timestamp_vn": fmt_ts_vn(e.get("timestamp", "")),
             "violation_type": vtype,
-            "title_tv": ("Nghi ngờ không đội mũ bảo hộ" if meta.get("review_reason")=="helmet_detection_unverified" else TEN_LOI_TV.get(vtype, vtype)),
+            "title_tv": TEN_LOI_TV.get(vtype, vtype),
             "status": status,
             "status_tv": TRANG_THAI_TV.get(status, status),
             "status_badge_tv": TRANG_THAI_BADGE_TV.get(status, status),

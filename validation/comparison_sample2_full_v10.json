@@ -1,0 +1,52 @@
+[
+  {
+    "video": "sample_2_hd.mp4",
+    "frame": 10,
+    "version": "original",
+    "label": "NO-Safety Vest",
+    "confidence": 0.7151,
+    "reason": null,
+    "full_score": null,
+    "crop_score": null
+  },
+  {
+    "video": "sample_2_hd.mp4",
+    "frame": 25,
+    "version": "original",
+    "label": "NO-Safety Vest",
+    "confidence": 0.6941,
+    "reason": null,
+    "full_score": null,
+    "crop_score": null
+  },
+  {
+    "video": "sample_2_hd.mp4",
+    "frame": 60,
+    "version": "original",
+    "label": "NO-Safety Vest",
+    "confidence": 0.625,
+    "reason": null,
+    "full_score": null,
+    "crop_score": null
+  },
+  {
+    "video": "sample_2_hd.mp4",
+    "frame": 155,
+    "version": "updated",
+    "label": "NO-Safety Vest",
+    "confidence": 0.6465328335762024,
+    "reason": null,
+    "full_score": 0.6465328335762024,
+    "crop_score": 0.6690462827682495
+  },
+  {
+    "video": "sample_2_hd.mp4",
+    "frame": 230,
+    "version": "original",
+    "label": "NO-Safety Vest",
+    "confidence": 0.6719,
+    "reason": null,
+    "full_score": null,
+    "crop_score": null
+  }
+]
