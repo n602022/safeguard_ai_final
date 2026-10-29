@@ -486,6 +486,24 @@ def render_review_page(raw_events: list, enriched_events: list):
                             on_click=_decide_event,
                             args=(cur_id, "false_positive"),
                         )
+                elif target_ev["status"] == "confirmed":
+                    btn_c1, btn_c2 = st.columns(2, gap="small")
+                    with btn_c1:
+                        st.button(
+                            "Đánh dấu báo nhầm",
+                            width="stretch",
+                            key=f"reject_{cur_id}",
+                            on_click=_decide_event,
+                            args=(cur_id, "false_positive"),
+                        )
+                    with btn_c2:
+                        st.button(
+                            "Về Chờ duyệt",
+                            width="stretch",
+                            key=f"reset_pend_{cur_id}",
+                            on_click=_decide_event,
+                            args=(cur_id, "pending"),
+                        )
                 else:
                     btn_c1, btn_c2, btn_c3 = st.columns([1.05, 1.05, 0.95], gap="small")
                     with btn_c1:
