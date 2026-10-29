@@ -516,6 +516,7 @@ class MultiPersonTrackerAndDeduplicator:
         self.max_inactive_frames = max_inactive_frames
         self.spatial_cooldown_frames = spatial_cooldown_frames
         self.active_workers = {}
+        self.dormant_workers = {}
         self.logged_worker_violations = {}
         self.logged_spatial_zones = []
 
@@ -528,7 +529,12 @@ class MultiPersonTrackerAndDeduplicator:
             if frame_idx - winfo["last_frame"] > self.max_inactive_frames
         ]
         for wid in stale_ids:
-            del self.active_workers[wid]
+            self.dormant_workers[wid] = self.active_workers.pop(wid)
+        # Short occlusions must not erase an identity and its event references.
+        self.dormant_workers = {
+            wid: info for wid, info in self.dormant_workers.items()
+            if frame_idx - info['last_frame'] <= self.max_inactive_frames * 4
+        }
 
         sorted_persons = sorted(person_detections, key=lambda d: (d["bbox"][0], d["bbox"][1]))
         num_dets = len(sorted_persons)
@@ -573,6 +579,21 @@ class MultiPersonTrackerAndDeduplicator:
             used_wids.add(wid)
 
         assigned = []
+        # Reacquire only a unique, strongly overlapping dormant track. Never
+        # merge two visible workers simply because they have the same violation.
+        dormant_candidates = {}
+        for det_idx, pdet in enumerate(sorted_persons):
+            if det_idx in matched_det_to_wid:
+                continue
+            candidates = [wid for wid, info in self.dormant_workers.items()
+                          if iou_score(pdet['bbox'], info['bbox']) >= 0.60]
+            if len(candidates) == 1:
+                dormant_candidates[det_idx] = candidates[0]
+        for det_idx, wid in dormant_candidates.items():
+            if list(dormant_candidates.values()).count(wid) != 1:
+                continue
+            matched_det_to_wid[det_idx] = wid
+            self.active_workers[wid] = self.dormant_workers.pop(wid)
         for det_idx in range(num_dets):
             pdet = sorted_persons[det_idx]
             pbox = pdet["bbox"]
@@ -1087,7 +1108,7 @@ def smart_detect_and_annotate(
         event_ref = tracker._event_refs.setdefault((wid, lbl), {})
         upgrade_pending = (already_logged and event_ref.get("status") == "pending"
                            and event_ref.get("event_id") is not None
-                           and conf >= auto_confirm_threshold and not review_reason)
+                           and conf >= auto_confirm_threshold)
         det_record = {
             "full_frame_confidence": full_frame_confidence,
             "crop_confidence": crop_confidence,
@@ -1181,8 +1202,10 @@ def save_new_violations_to_db(
         conf = v["confidence"]
         wid = v.get("worker_id", 1)
 
-        initial_status = ("pending" if v.get("review_reason") else classify_event_status(conf, auto_confirm_threshold))
-        upgrade_id = v.get("upgrade_event_id")
+        # Diagnostic review reasons do not override the user's routing rule.
+        initial_status = classify_event_status(conf, auto_confirm_threshold)
+        event_ref = v.setdefault("event_ref", {})
+        upgrade_id = v.get("upgrade_event_id") or event_ref.get("event_id")
         previous_meta = None
         if upgrade_id is not None:
             if initial_status != "confirmed":
@@ -1237,11 +1260,11 @@ def save_new_violations_to_db(
             "initial_status": initial_status,
             "current_status": initial_status,
             "status_origin": "ai_auto" if initial_status == "confirmed" else "ai_pending",
-            "triage_rule": "verified_confidence_or_review_reason_v9",
+            "triage_rule": "confidence_threshold_v13",
             "verification_score": v.get("verification_score", 0.0),
             "support_frames": v.get("support_frames", 1),
             "support_seconds": v.get("support_seconds", 0.0),
-            "verification_reason": "threshold_pass" if initial_status == "confirmed" else (v.get("review_reason") or "below_selected_threshold"),
+            "verification_reason": "threshold_pass" if initial_status == "confirmed" else "below_selected_threshold",
             "temporal_verification_reason": v.get("verification_reason", "not_recorded"),
             "temporal_quality_pass": v.get("temporal_quality_pass", False),
             "auto_confirm_threshold": auto_confirm_threshold,
