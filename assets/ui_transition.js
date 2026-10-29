@@ -1,8 +1,13 @@
 (() => {
   let win, doc;
   try {win=window.parent;doc=win.document;} catch (_) {return;}
-  if(win.__sgTransitionInstalled) return;
-  win.__sgTransitionInstalled=true;
+  if(win.__sgTransitionVersion === 11) return;
+  if(win.__sgTransitionDispose) win.__sgTransitionDispose();
+  doc.getElementById('sg-transition-snapshot')?.remove();
+  win.__sgTransitionVersion=11;
+  const controller = new win.AbortController();
+  const tokens=()=>Array.from(doc.querySelectorAll('[data-sg-render-token]')).map(el=>el.dataset.sgRenderToken).join('|');
+  let beforeTokens='';
   let overlay=null,quiet=null,watchdog=null,started=0;
   const running=()=>!!doc.querySelector('.stApp[data-teststate="running"]');
   const release=()=>{if(overlay){overlay.remove();overlay=null;}win.clearTimeout(quiet);win.clearTimeout(watchdog);};
@@ -10,12 +15,13 @@
     if(!overlay)return;
     win.clearTimeout(quiet);
     quiet=win.setTimeout(()=>{
-      if(!running() && Date.now()-started>180)release();
+      if(tokens()!==beforeTokens && !running() && Date.now()-started>180)release();
       else if(overlay)settle();
     },120);
   };
   const freeze=()=>{
     if(overlay)return;
+    beforeTokens=tokens();
     const app=doc.querySelector('.stApp');if(!app)return;
     const clone=app.cloneNode(true);
     const originals=[app,...app.querySelectorAll('*')];
@@ -34,14 +40,16 @@
   doc.addEventListener('click',event=>{
     const button=event.target.closest('button');if(!button)return;
     // Live scan must stream its frames. Native pickers/downloads need no mask.
-    if(/Bắt đầu quét|Browse|Tải bằng chứng|Xuất báo cáo|Tải xuống/i.test(button.textContent||''))return;
+    if(/Bắt đầu quét|Dừng quét|Browse|Tải bằng chứng|Xuất báo cáo|Tải xuống/i.test(button.textContent||''))return;
     if(button.closest('[data-testid="stFileUploader"],#sg-transition-snapshot'))return;
     freeze();
-  },true);
+  },{capture:true,signal:controller.signal});
   doc.addEventListener('change',event=>{
     if(event.target.matches('input[type="file"]'))return;
     if(event.target.closest('.stApp'))freeze();
-  },true);
-  new win.MutationObserver(settle).observe(doc.querySelector('#root')||doc.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-teststate']});
-  doc.addEventListener('visibilitychange',()=>{if(doc.hidden)release();});
+  },{capture:true,signal:controller.signal});
+  const observer=new win.MutationObserver(settle);
+  observer.observe(doc.querySelector('#root')||doc.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-teststate']});
+  doc.addEventListener('visibilitychange',()=>{if(doc.hidden)release();},{signal:controller.signal});
+  win.__sgTransitionDispose=()=>{release();controller.abort();observer.disconnect();};
 })();

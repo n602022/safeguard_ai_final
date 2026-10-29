@@ -1,20 +1,32 @@
 
 from pathlib import Path
 
-from ultralytics import YOLO
 
 # Duong dan den thu muc project
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "best.pt"
 
-# Kiem tra file mo hinh
-if not MODEL_PATH.is_file():
-    raise FileNotFoundError(
-        f"Khong tim thay mo hinh: {MODEL_PATH}"
-    )
+import threading
 
-# Nap mo hinh mot lan khi import module
-_model = YOLO(str(MODEL_PATH))
+class _LazyDetector:
+    def __init__(self):
+        self._instance = None
+        self._lock = threading.RLock()
+    def _load(self):
+        if self._instance is None:
+            from ultralytics import YOLO
+            if not MODEL_PATH.is_file():
+                raise FileNotFoundError(f"Khong tim thay mo hinh: {MODEL_PATH}")
+            self._instance = YOLO(str(MODEL_PATH))
+        return self._instance
+    def predict(self, *args, **kwargs):
+        with self._lock:
+            return self._load().predict(*args, **kwargs)
+    def __getattr__(self, name):
+        with self._lock:
+            return getattr(self._load(), name)
+
+_model = _LazyDetector()
 
 
 def detect_frame(frame, conf=0.45):

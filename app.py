@@ -10,6 +10,9 @@ import time
 
 import streamlit as st
 
+from runtime_loader import refresh_project_modules
+refresh_project_modules()
+
 from core_logic import (
     BASE_DIR,
     EVIDENCE_DIR,
@@ -48,7 +51,7 @@ from ui_pages.documents import render_documents_page
 from ui_pages.review import render_review_page
 from ui_pages.scanner import render_scanner_page
 from ui_theme import apply_ui_theme
-from ui_transition import install_transition_guard
+from ui_transition import install_transition_guard, mark_render_complete
 
 
 @st.cache_resource(show_spinner=False)
@@ -133,6 +136,8 @@ def main():
             render_documents_page()
         else:
             render_dashboard_page(raw_events=raw_events, enriched_events=enriched_events)
+
+    mark_render_complete()
 
     if perf_on:
         # Chế độ đo hiệu năng: mở trang với ?perf=1 để biết phần nào chậm

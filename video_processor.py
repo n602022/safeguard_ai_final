@@ -39,16 +39,19 @@ def read_frames(video_path, frame_step=1, max_width=960):
     max_width: thu nho frame neu qua rong (video 4K rat nang).
     Neu video hong thi in loi va ket thuc, KHONG bi sap.
     """
+    if not isinstance(frame_step, int) or frame_step < 1:
+        raise ValueError("frame_step must be a positive integer")
     cap = open_video(video_path)
     if cap is None:
         return
     index = 0
     try:
         while True:
-            ok, frame = cap.read()
-            if not ok:  # het video hoac frame loi
+            if not cap.grab():
                 break
             if index % frame_step == 0:
+                ok, frame = cap.retrieve()
+                if not ok: break
                 h, w = frame.shape[:2]
                 if max_width and w > max_width:
                     scale = max_width / w

@@ -695,6 +695,18 @@ def _draw_smart_label(img, text: str, x1: int, y1: int, bg_color: tuple, font_sc
     )
 
 
+def _predict_crop_once(frame, bounds, tracker, frame_idx, conf=.25):
+    x1,y1,x2,y2 = bounds
+    if getattr(tracker,"_crop_frame",None) != frame_idx:
+        tracker._crop_frame = frame_idx
+        tracker._crop_predictions = {}
+    key = (x1,y1,x2,y2,float(conf))
+    cache = tracker._crop_predictions
+    if key not in cache:
+        cache[key] = _model.predict(source=frame[y1:y2,x1:x2],conf=conf,verbose=False)
+    return cache[key]
+
+
 def refine_distant_detections(frame, detections, tracker, frame_idx):
     """Recheck at most three small persons at crop scale; never infer absent PPE."""
     h, w = frame.shape[:2]
@@ -710,7 +722,7 @@ def refine_distant_detections(frame, detections, tracker, frame_idx):
         cached = next((c for c in old_cache if 0 <= frame_idx-c["frame"] < 15 and iou_score(pb,c["bbox"]) >= 0.7),None)
         if cached is None:
             items=[]
-            for result in _model.predict(source=frame[y1:y2,x1:x2],conf=0.3,verbose=False):
+            for result in _predict_crop_once(frame,(x1,y1,x2,y2),tracker,frame_idx,conf=.3):
                 if result.boxes is None: continue
                 for box in result.boxes:
                     label=result.names[int(box.cls.item())]; confidence=float(box.conf.item())
@@ -810,7 +822,7 @@ def smart_detect_and_annotate(
             continue
         cached = next((entry for entry in tracker._vest_crop_cache if 0 <= frame_idx-entry["frame"] < 15 and iou_score(pb,entry["bbox"]) >= 0.7), None)
         if cached is None:
-            crop_results = _model.predict(source=frame_bgr[y1:y2, x1:x2], conf=0.25, verbose=False)
+            crop_results = _predict_crop_once(frame_bgr,(x1,y1,x2,y2),tracker,frame_idx)
             positives, negatives = [], []
             for result in crop_results:
                 if result.boxes is None:
@@ -948,7 +960,7 @@ def smart_detect_and_annotate(
         if entry is None or iou_score(entry["bbox"], worker_bbox) < .7:
             x1,y1,x2,y2 = max(0,worker_bbox[0]),max(0,worker_bbox[1]),min(w,worker_bbox[2]),min(h,worker_bbox[3])
             items=[]
-            for result in _model.predict(source=frame_bgr[y1:y2,x1:x2], conf=.25, verbose=False):
+            for result in _predict_crop_once(frame_bgr,(x1,y1,x2,y2),tracker,frame_idx):
                 if result.boxes is None: continue
                 for box in result.boxes:
                     b=box.xyxy[0].tolist()

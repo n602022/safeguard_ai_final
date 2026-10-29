@@ -1,0 +1,618 @@
+[
+  {
+    "source": "test1.jpeg",
+    "original": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.7004,
+        "bbox": [
+          475,
+          158,
+          535,
+          201
+        ]
+      }
+    ],
+    "original_seconds": 1.9,
+    "patched": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.7004,
+        "bbox": [
+          475,
+          158,
+          535,
+          201
+        ]
+      }
+    ],
+    "patched_seconds": 0.158
+  },
+  {
+    "source": "test2.jpeg",
+    "original": [],
+    "original_seconds": 0.304,
+    "patched": [],
+    "patched_seconds": 0.241
+  },
+  {
+    "source": "test3.jpeg",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5623,
+        "bbox": [
+          890,
+          1180,
+          991,
+          1309
+        ]
+      }
+    ],
+    "original_seconds": 0.33,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5623,
+        "bbox": [
+          890,
+          1180,
+          991,
+          1309
+        ]
+      }
+    ],
+    "patched_seconds": 0.298
+  },
+  {
+    "source": "test4.JPG",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.6674294471740723,
+        "bbox": [
+          395,
+          490,
+          449,
+          534
+        ]
+      }
+    ],
+    "original_seconds": 0.311,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.6674294471740723,
+        "bbox": [
+          395,
+          490,
+          449,
+          534
+        ]
+      }
+    ],
+    "patched_seconds": 0.188
+  },
+  {
+    "source": "sample_1_hd.mp4:0",
+    "original": [],
+    "original_seconds": 0.275,
+    "patched": [],
+    "patched_seconds": 0.16
+  },
+  {
+    "source": "sample_1_hd.mp4:60",
+    "original": [],
+    "original_seconds": 0.146,
+    "patched": [],
+    "patched_seconds": 0.089
+  },
+  {
+    "source": "sample_1_hd.mp4:121",
+    "original": [],
+    "original_seconds": 0.291,
+    "patched": [],
+    "patched_seconds": 0.125
+  },
+  {
+    "source": "sample_1_hd.mp4:182",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5919753909111023,
+        "bbox": [
+          441,
+          199,
+          717,
+          405
+        ]
+      }
+    ],
+    "original_seconds": 0.222,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5919753909111023,
+        "bbox": [
+          441,
+          199,
+          717,
+          405
+        ]
+      }
+    ],
+    "patched_seconds": 0.274
+  },
+  {
+    "source": "sample_2_hd.mp4:0",
+    "original": [],
+    "original_seconds": 0.259,
+    "patched": [],
+    "patched_seconds": 0.171
+  },
+  {
+    "source": "sample_2_hd.mp4:77",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6976,
+        "bbox": [
+          609,
+          152,
+          651,
+          239
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6228,
+        "bbox": [
+          199,
+          126,
+          329,
+          263
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5224,
+        "bbox": [
+          307,
+          93,
+          380,
+          200
+        ]
+      }
+    ],
+    "original_seconds": 0.269,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6976,
+        "bbox": [
+          609,
+          152,
+          651,
+          239
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6228,
+        "bbox": [
+          199,
+          126,
+          329,
+          263
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5224,
+        "bbox": [
+          307,
+          93,
+          380,
+          200
+        ]
+      }
+    ],
+    "patched_seconds": 0.275
+  },
+  {
+    "source": "sample_2_hd.mp4:155",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5964615941047668,
+        "bbox": [
+          618,
+          144,
+          656,
+          226
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6109,
+        "bbox": [
+          209,
+          118,
+          329,
+          238
+        ]
+      },
+      {
+        "label": "NO-Mask",
+        "confidence": 0.5853571891784668,
+        "bbox": [
+          316,
+          62,
+          327,
+          73
+        ]
+      }
+    ],
+    "original_seconds": 0.297,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5964615941047668,
+        "bbox": [
+          618,
+          144,
+          656,
+          226
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6109,
+        "bbox": [
+          209,
+          118,
+          329,
+          238
+        ]
+      },
+      {
+        "label": "NO-Mask",
+        "confidence": 0.5853571891784668,
+        "bbox": [
+          316,
+          62,
+          327,
+          73
+        ]
+      }
+    ],
+    "patched_seconds": 0.327
+  },
+  {
+    "source": "sample_2_hd.mp4:232",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.7949,
+        "bbox": [
+          313,
+          71,
+          383,
+          166
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6641941070556641,
+        "bbox": [
+          607,
+          130,
+          650,
+          210
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6317309737205505,
+        "bbox": [
+          206,
+          102,
+          321,
+          227
+        ]
+      }
+    ],
+    "original_seconds": 0.23,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.7949,
+        "bbox": [
+          313,
+          71,
+          383,
+          166
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6641941070556641,
+        "bbox": [
+          607,
+          130,
+          650,
+          210
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6317309737205505,
+        "bbox": [
+          206,
+          102,
+          321,
+          227
+        ]
+      }
+    ],
+    "patched_seconds": 0.228
+  },
+  {
+    "source": "sample_3_vertical.mp4:0",
+    "original": [],
+    "original_seconds": 0.123,
+    "patched": [],
+    "patched_seconds": 0.063
+  },
+  {
+    "source": "sample_3_vertical.mp4:126",
+    "original": [],
+    "original_seconds": 0.074,
+    "patched": [],
+    "patched_seconds": 0.075
+  },
+  {
+    "source": "sample_3_vertical.mp4:252",
+    "original": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.6743047833442688,
+        "bbox": [
+          176,
+          162,
+          196,
+          181
+        ]
+      }
+    ],
+    "original_seconds": 0.324,
+    "patched": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.6743047833442688,
+        "bbox": [
+          176,
+          162,
+          196,
+          181
+        ]
+      }
+    ],
+    "patched_seconds": 0.135
+  },
+  {
+    "source": "sample_3_vertical.mp4:378",
+    "original": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.6307520270347595,
+        "bbox": [
+          168,
+          172,
+          186,
+          190
+        ]
+      }
+    ],
+    "original_seconds": 0.187,
+    "patched": [
+      {
+        "label": "NO-Mask",
+        "confidence": 0.6307520270347595,
+        "bbox": [
+          168,
+          172,
+          186,
+          190
+        ]
+      }
+    ],
+    "patched_seconds": 0.115
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:0",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7715,
+        "bbox": [
+          262,
+          195,
+          300,
+          220
+        ]
+      }
+    ],
+    "original_seconds": 0.113,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7715,
+        "bbox": [
+          262,
+          195,
+          300,
+          220
+        ]
+      }
+    ],
+    "patched_seconds": 0.082
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:152",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7319,
+        "bbox": [
+          324,
+          185,
+          355,
+          208
+        ]
+      }
+    ],
+    "original_seconds": 0.105,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.7319,
+        "bbox": [
+          324,
+          185,
+          355,
+          208
+        ]
+      }
+    ],
+    "patched_seconds": 0.089
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:305",
+    "original": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.8055,
+        "bbox": [
+          334,
+          126,
+          366,
+          150
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5522,
+        "bbox": [
+          310,
+          156,
+          367,
+          217
+        ]
+      }
+    ],
+    "original_seconds": 0.23,
+    "patched": [
+      {
+        "label": "NO-Hardhat",
+        "confidence": 0.8055,
+        "bbox": [
+          334,
+          126,
+          366,
+          150
+        ]
+      },
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.5522,
+        "bbox": [
+          310,
+          156,
+          367,
+          217
+        ]
+      }
+    ],
+    "patched_seconds": 0.224
+  },
+  {
+    "source": "sample_4_no_hardhat_mask.mp4:458",
+    "original": [],
+    "original_seconds": 0.091,
+    "patched": [],
+    "patched_seconds": 0.077
+  },
+  {
+    "source": "sample_5_heavy.mp4:0",
+    "original": [],
+    "original_seconds": 0.106,
+    "patched": [],
+    "patched_seconds": 0.095
+  },
+  {
+    "source": "sample_5_heavy.mp4:107",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.764117419719696,
+        "bbox": [
+          247,
+          24,
+          419,
+          177
+        ]
+      }
+    ],
+    "original_seconds": 0.21,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.764117419719696,
+        "bbox": [
+          247,
+          24,
+          419,
+          177
+        ]
+      }
+    ],
+    "patched_seconds": 0.105
+  },
+  {
+    "source": "sample_5_heavy.mp4:215",
+    "original": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6977,
+        "bbox": [
+          180,
+          51,
+          382,
+          205
+        ]
+      }
+    ],
+    "original_seconds": 0.198,
+    "patched": [
+      {
+        "label": "NO-Safety Vest",
+        "confidence": 0.6977,
+        "bbox": [
+          180,
+          51,
+          382,
+          205
+        ]
+      }
+    ],
+    "patched_seconds": 0.112
+  },
+  {
+    "source": "sample_5_heavy.mp4:323",
+    "original": [],
+    "original_seconds": 0.063,
+    "patched": [],
+    "patched_seconds": 0.037
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "file": "sample_1_hd.mp4",
+    "mb": 10.24,
+    "write_seconds": 0.0048,
+    "first_frame_seconds": 0.2267
+  },
+  {
+    "file": "sample_2_hd.mp4",
+    "mb": 5.98,
+    "write_seconds": 0.0019,
+    "first_frame_seconds": 0.0372
+  },
+  {
+    "file": "sample_3_vertical.mp4",
+    "mb": 8.06,
+    "write_seconds": 0.002,
+    "first_frame_seconds": 0.816
+  },
+  {
+    "file": "sample_4_no_hardhat_mask.mp4",
+    "mb": 17.28,
+    "write_seconds": 0.0053,
+    "first_frame_seconds": 0.0657
+  },
+  {
+    "file": "sample_5_heavy.mp4",
+    "mb": 47.25,
+    "write_seconds": 0.0163,
+    "first_frame_seconds": 0.2035
+  }
+]

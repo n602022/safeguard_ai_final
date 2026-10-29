@@ -1,0 +1,15 @@
+{
+  "app.py": "830a7e0c85e10e2d751f0cd16909cd7c101c81b3d352d026385349a303f1265c",
+  "runtime_loader.py": "b9171e11f3f8891ce570e8d8b2ad03d16e34624ed813a61a3cd36c108808bde6",
+  "core_logic.py": "3c3670e700c93fe8b9fab64ca59fb80362fb0875b0d27e22e7943b3b9c9efb84",
+  "detector.py": "e0b49d7020c67ddfe801d9590430cb52b9f91e7d233790f198ac2bcd3fafe826",
+  "video_processor.py": "e4276cde23cbc4f3fd4d26ea858c0075772a5bd32d475d155d0f0e4a894f7043",
+  "app_clock.py": "d58d4a295080356cedffdf6550bb79709e0e4d12c255d27b769bb790a2ef91d7",
+  "ui_theme.py": "06ced4d3441aad1e83afd36ec7188e335b6580b774a0fd6f139d137d1b65b6f1",
+  "ui_transition.py": "2a4931172e6cc6c191118391d02befcf037c2015b87332462ee66c8491c6b2f4",
+  "assets/ui_transition.js": "a1bb97e4a0163228c958dea0424e738551a461f9555d85b056bef7d1666b515f",
+  "ui_pages/scanner.py": "aa312a7f1fd0e48c8eccd0794574d5cdb8fbb76dc96442f2bdccddb780040703",
+  "ui_pages/dashboard.py": "cea058e3ca54cb4a56c53a8cc3ddb1f17e34f2f8cf2ba86c12c4d1dcb799881b",
+  "ui_pages/review.py": "8b4ea7642d29f312aec0ab5e97f0f8df50884ffc3b930c38802a4fe77cbbdc2d",
+  "ui_pages/assistant.py": "923c2f06e4444efce3d05e08205cd609a2de14fe300308c4c0ecfed9734c72b9"
+}

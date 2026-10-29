@@ -2017,7 +2017,7 @@ __NAV_ICONS__
 }
 [data-testid="stMain"] button:not(:disabled):active { transform: translateY(1px); }
 /* Giữ nội dung trang hiện tại hiển thị đầy đủ trong lúc chờ dựng trang mới (không mờ đi gây cảm giác chậm) */
-[data-stale="true"], [data-testid="stElementContainer"][data-stale="true"] { opacity: 1 !important; transition: none !important; }
+
 
 /* Tương phản + nhất quán: thao tác nguy hiểm (Dừng khẩn cấp + Làm mới dữ liệu ca trực) luôn mang màu đỏ, tách khỏi nút thường */
 [data-testid="stMain"] :is([class*="st-key-em_stop_"], [class*="st-key-estop_"], .st-key-scan_btn_reset_shift) button {

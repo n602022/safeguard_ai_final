@@ -130,8 +130,8 @@ def _camera_thumb_uri(path_str: str, v_tag: int = 2) -> str:
 @st.cache_data(show_spinner=False, max_entries=24)
 def _cached_first_frame_preview(
     video_path_str: str,
-    conf_threshold: float,
-    active_violations_tuple: tuple[str, ...],
+    _conf_threshold: float,
+    _active_violations_tuple: tuple[str, ...],
     v_tag: int = 4,
 ):
     """Cached raw preview: do not run inference while accepting an upload."""
@@ -223,7 +223,7 @@ def _build_telemetry_html(worker_cnt: int, env_info: dict) -> str:
     )
 
 
-def render_scanner_page(raw_events: list):
+def _render_scanner_page(raw_events: list):
     """
     Hiển thị trang Quét AI & Camera theo bố cục 2 cột cân bằng chiều cao:
     - Cột chính bên trái (`col_main`): Trên là Màn hình Giám sát AI 16:9 cỡ lớn, dưới là dải Nguồn Camera nằm ngang.
@@ -624,7 +624,8 @@ def render_scanner_page(raw_events: list):
                     tmp_dir = Path(tempfile.gettempdir()) / "safeguard_v6"
                     tmp_dir.mkdir(parents=True, exist_ok=True)
                     upload_key = (uploaded.file_id, uploaded.size)
-                    if st.session_state.get("_prepared_upload_key") != upload_key:
+                    if (st.session_state.get("_prepared_upload_key") != upload_key
+                            or not Path(st.session_state.get("_prepared_upload_path", "__missing__")).is_file()):
                         tmp_path = tmp_dir / (uuid.uuid4().hex + ext)
                         tmp_path.write_bytes(uploaded.getbuffer())
                         previous = st.session_state.get("_prepared_upload_path")
@@ -640,7 +641,7 @@ def render_scanner_page(raw_events: list):
                     )
                 else:
                     _render_monitor_header(f"Ảnh kiểm tra ({uploaded.name})", is_running=False)
-                    raw_bytes = np.asarray(bytearray(uploaded.getvalue()), dtype=np.uint8)
+                    raw_bytes = np.frombuffer(uploaded.getbuffer(), dtype=np.uint8)
                     img_bgr = cv2.imdecode(raw_bytes, cv2.IMREAD_COLOR)
                     if img_bgr is not None:
                         img_bgr = _normalize_scan_frame(img_bgr)
@@ -801,3 +802,9 @@ def render_scanner_page(raw_events: list):
         else:
             st.markdown('<div class="sg-panel-title">Nhật ký phiên quét</div>', unsafe_allow_html=True)
             st.info("Chưa có dữ liệu vi phạm.")
+
+@st.fragment
+def render_scanner_page(raw_events):
+    from ui_transition import mark_render_complete
+    _render_scanner_page(raw_events)
+    mark_render_complete()

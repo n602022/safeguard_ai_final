@@ -5,7 +5,7 @@ import sys
 sys.path.insert(0,str(__import__('pathlib').Path(__file__).resolve().parents[1]))
 from app_clock import app_now
 
-s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate','refine_distant_detections','refine_weak_ppe_detections'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
+s=ast.parse(open(str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'core_logic.py')).read());names={'box_overlap_ratio','iou_score','box_inclusion_ratio','is_anatomically_valid','evaluate_lighting_and_glare','MultiPersonTrackerAndDeduplicator','_draw_smart_label','smart_detect_and_annotate','_predict_crop_once','refine_distant_detections','refine_weak_ppe_detections'};s.body=[n for n in s.body if isinstance(n,(ast.FunctionDef,ast.ClassDef)) and n.name in names]
 ns={'math':math,'cv2':cv2,'np':np};exec(compile(s,'core','exec'),ns)
 labels=['Person','NO-Hardhat','Hardhat','NO-Safety Vest','Safety Vest','NO-Mask','Mask']
 def set_dets(ds):
